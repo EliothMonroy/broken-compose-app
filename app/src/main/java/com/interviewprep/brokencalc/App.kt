@@ -23,7 +23,7 @@ fun App() {
     Column(modifier = Modifier.fillMaxSize()) {
         TopBar()
         if (currentScreen == "calculator") {
-            CalculatorScreen()
+            AdaptiveCalculator()
         } else if (currentScreen == "history") {
             HistoryScreen()
         } else if (currentScreen == "settings") {

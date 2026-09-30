@@ -737,7 +737,60 @@ Useful commands (all need API 33+ for the per-app language):
 
 ## Adaptive UI
 
-<!-- placeholder: bugs #98–#102 (adaptive) -->
+On a tablet, the calculator screen now shows the History list next to the keypad, or under it when the tablet is in portrait. Tap an entry in that side pane and it shows up in a card at the top, and Back clears it again. The code is in `TwoPane.kt`. The app also accepts a hardware keyboard (`HardwareKeyboard.kt`), and on the calculator Back should ask "Press Back again to exit" (`BackToExit.kt`). These bugs cover window size classes, multi-window, keeping state across configuration changes, predictive back and keyboard input.
+
+Useful commands:
+- Pretend the emulator is a tablet: `adb shell wm size 2560x1600` and `adb shell wm density 320`. Undo it with `adb shell wm size reset` and `adb shell wm density reset`. A Pixel Tablet or "Resizable" emulator works too.
+- Rotate while auto-rotate is off: `adb shell settings put system user_rotation 1`. Use `0` to go back to the normal orientation.
+- Split-screen: on a tablet emulator, open Recents, tap the app's icon and choose **Split screen**. From the command line: `adb shell am start --windowingMode 6 -n com.interviewprep.brokencalc/.MainActivity`, find the task number with `adb shell dumpsys activity activities | grep "A=.*brokencalc"` (the `#NNN`), then `adb shell am task resize NNN 0 0 1100 1600` to make the window about 550 × 800 dp. To go back to full screen, run the same `am start` command with `--windowingMode 1`.
+- Keyboard: the emulator passes your computer's keyboard through, so you can just type. You can also send keys with `adb shell input keyevent KEYCODE_1`.
+
+> ⚠️ **#101 swallows every Back press on the calculator screen of a tablet**, so try #100 on a phone (or fix #101 first). Rotating a tablet also triggers #23, #26 and #72. That's expected.
+
+- [ ] **98. In split-screen on a tablet, the keypad is cut off**
+  - Steps: make the emulator a tablet (see above) and open the app. The History pane sits next to the calculator. Now put the app in split-screen at about half the width, or use the `am task resize` command above.
+  - Expected: a window this narrow (about 550 dp) gets the normal phone layout, with the whole keypad.
+  - Actual: the tablet layout stays. The History pane takes the bottom 320 dp of the window, and the keypad is cut off after the `7 8 9 ÷` row, so `=` can't be reached.
+  <details><summary>Hint</summary>Look at <code>isTablet()</code> in <code>TwoPane.kt</code>. What does <code>computeMaximumWindowMetrics</code> measure: the screen, or the window your app actually has? In split-screen, in desktop-style windows and on foldables, those are very different. "Is this a tablet?" is the wrong question. Ask "how much space does my window have right now?" Look at <code>currentWindowAdaptiveInfo().windowSizeClass</code> (material3-adaptive) or <code>calculateWindowSizeClass(activity)</code>, and at the 600 dp / 840 dp width breakpoints. Follow-ups: a big phone in landscape is about 900 dp wide. Should it get two panes, and what happens to #20 if it does? Why is checking <code>Build.MODEL</code> even worse, and how would a <code>values-sw600dp</code> boolean behave in split-screen?</details>
+
+- [ ] **99. The selected History entry disappears when you rotate the tablet**
+  - Steps: make the emulator a tablet, in landscape. Do `2+2=` and `5×6=`, then tap `5×6 = 30` in the side pane, so the card at the top shows it. Rotate to portrait (`user_rotation 1`).
+  - Expected: `5×6 = 30` is still selected. (The display going back to `0` is #26, a separate bug.)
+  - Actual: the card is gone and the pane says "Tap an entry to see it here". Rotate back to landscape and the old selection comes back.
+  <details><summary>Hint</summary>The selection is in <code>rememberSaveable</code>, so why is it lost? Saved values are stored by their <b>position</b> in the composition. Look at where <code>HistoryPane</code> is called in <code>TwoPaneCalculator</code>: once in each branch of an <code>if</code>. To Compose those are two different places, each with its own saved slot, which is also why the old value comes back when you rotate back. Hoist the state above the <code>if</code> and pass it down, or keep it in a ViewModel with <code>SavedStateHandle</code>. Interview angles: state hoisting, what <code>key()</code> and <code>movableContentOf</code> do, and what else resets when a layout switches (scroll position, text fields). Once #98 is fixed, resizing or folding switches layouts too, so the question gets more important.</details>
+
+- [ ] **100. "Press Back again to exit" never shows: the first Back closes the app**
+  - Steps: on a phone, open the app, stay on the calculator and press Back once.
+  - Expected: a "Press Back again to exit" toast. Only a second Back within 2 seconds closes the app.
+  - Actual: the app closes straight away and the toast never appears.
+  <details><summary>Hint</summary>Look at <code>onBackPressed()</code> in <code>MainActivity</code>. Why is it marked deprecated? The app targets SDK 36, and on Android 16+ that turns on predictive back by default: the system no longer calls <code>onBackPressed()</code> or sends <code>KEYCODE_BACK</code>. Adding <code>android:enableOnBackInvokedCallback="false"</code> to the manifest makes the toast show again. Why is that only a temporary opt-out? The supported way is <code>OnBackPressedDispatcher</code> with an <code>OnBackPressedCallback</code>, or <code>BackHandler</code> in Compose. Watch out: if your callback is enabled on every screen, History and Settings will show the toast instead of closing the app (#8 is still there). Also, any enabled callback turns off the back-to-home preview. Is "press Back again to exit" still a good pattern with predictive back?</details>
+
+- [ ] **101. On a tablet, Back never leaves the calculator**
+  - Steps: make the emulator a tablet and open the app on the calculator. Tap an entry in the side pane, then press Back, which clears the card. Now press Back a few more times, or swipe back from the edge.
+  - Expected: once nothing is selected, Back works as usual: it leaves the app (or shows #100's toast), and the swipe shows the back-to-home preview.
+  - Actual: nothing happens. The app never closes with Back while the calculator is showing on a tablet. (Open History from the top bar and Back closes the app there, see #8.)
+  <details><summary>Hint</summary>Look at the <code>BackHandler</code> in <code>HistoryPane</code>. Which <code>enabled</code> value does it use when you don't pass one? An enabled callback tells the system "I'll handle Back" <b>before</b> the gesture starts. That's why the system can't play the back-to-home animation, and why a callback that does nothing traps the user. <code>enabled</code> should follow your state, for example <code>enabled = selected != null</code>. Interview angles: why predictive back needs to know in advance who handles Back, and how <code>PredictiveBackHandler</code> lets you animate the card away while the user is still swiping.</details>
+
+- [ ] **102. A hardware keyboard types every key twice**
+  - Steps: with the emulator focused, type `1` then `2` on your keyboard (or use `adb shell input keyevent`). Then tap `C` and `8` on the screen and press Backspace on the keyboard. Also try typing `7` and then `=`.
+  - Expected: the display shows `12`. Backspace removes the `8`. `7` `=` adds one History entry.
+  - Actual: the display shows `1122`. Backspace removes the `8`, then the app crashes with `StringIndexOutOfBoundsException` (that's #1, triggered by a second Backspace nobody pressed). `7` `=` shows `77` and adds `77 = 77` to History twice.
+  <details><summary>Hint</summary>Log every <code>KeyEvent</code> the listener in <code>HardwareKeyboard.kt</code> gets. How many events does one key press send? Look at <code>event.action</code> (<code>ACTION_DOWN</code> and <code>ACTION_UP</code>) and at <code>repeatCount</code> for a key that's held down. In Compose you'd normally use <code>Modifier.onKeyEvent</code> or <code>onPreviewKeyEvent</code> and check <code>KeyEventType.KeyDown</code>. Then you need a focused node, so think about what happens to focus when the user taps the screen (touch mode). Follow-ups: <code>Shift</code>+<code>8</code> should type <code>×</code> on a US keyboard, so how would you read modifiers or the typed character? How would you add <code>Ctrl</code>+<code>C</code> to copy the result?</details>
+
+**Bad practices in this area**
+
+- [ ] "Is it a tablet?" is one `Boolean` with a hard-coded `600`, instead of window size classes that are re-read whenever the window changes.
+- [ ] The layout is picked from `LocalConfiguration.orientation`. Orientation says nothing about how much space there is: a tablet in portrait (800 dp wide) has far more room than a phone in landscape.
+- [ ] Fixed pane sizes (`width(360.dp)`, `height(320.dp)`) instead of weights or a pane scaffold such as `ListDetailPaneScaffold` (that needs the `adaptive-layout` library, which isn't a dependency yet).
+- [ ] `HistoryPane` copies the list code from `HistoryList`, reads the global `HistoryManager` directly, and splits strings on `" = "` again.
+- [ ] `HardwareKeyboard` hooks the whole window's root view from inside one composable, ignores Shift and Ctrl, and has no keyboard shortcut help (`onProvideKeyboardShortcuts`).
+- [ ] The "Press Back again to exit" toast text is hard-coded, and `lastBackPress` is a global `var`.
+
+**Stretch goals**
+
+- [ ] Write a Compose UI test that forces a size (`DeviceConfigurationOverride.ForcedSize`) and checks both layouts on one device.
+- [ ] Add a tabletop layout for foldables with `WindowInfoTracker` and `FoldingFeature` (`androidx.window` is already a dependency): display on the top half, keypad on the bottom half.
+- [ ] Make the selection survive process death and window changes by moving it into a ViewModel with `SavedStateHandle`.
 
 ---
 

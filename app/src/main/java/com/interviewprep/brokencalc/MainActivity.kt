@@ -34,4 +34,11 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+
+    @Deprecated("Deprecated in Java")
+    override fun onBackPressed() {
+        if (confirmExit(this)) {
+            super.onBackPressed()
+        }
+    }
 }

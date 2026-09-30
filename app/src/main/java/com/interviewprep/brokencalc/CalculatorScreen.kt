@@ -73,6 +73,7 @@ fun CalculatorScreen() {
 
     ShakeToClear(vm)
     WelcomeBack(vm.display)
+    HardwareKeyboard(vm)
 
     var displayText = vm.display
     if (displayText == "") displayText = "0"
