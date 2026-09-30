@@ -54,8 +54,11 @@ Everything is in one flat package on purpose. The groups below are only for read
 app/src/main/java/com/interviewprep/brokencalc/
 │  App shell
 ├── CalcApp.kt              # @HiltAndroidApp Application; WorkManager Configuration.Provider, daily backup
-├── MainActivity.kt         # entry point; static Activity/prefs refs; loads history/memory; usage timer, startup tasks
+├── MainActivity.kt         # entry point; static Activity/prefs refs; loads history/memory; usage timer, startup tasks; onBackPressed
 ├── App.kt                  # string-based "navigation", top bar ($ converter button, History badge)
+├── TwoPane.kt              # AdaptiveCalculator: tablet two-pane layout (adaptive bugs #98–#102)
+├── BackToExit.kt           # "Press Back again to exit"
+├── HardwareKeyboard.kt     # hardware keyboard input
 ├── Theme.kt                # CalcTheme(dark)
 ├── Globals.kt              # global mutable state: screen, selected history item, memory, appScope
 │  Calculator
@@ -74,15 +77,22 @@ app/src/main/java/com/interviewprep/brokencalc/
 ├── InputLog.kt             # per-keystroke input log file
 ├── Startup.kt              # startup "warm-up" + debug StrictMode
 ├── Accessibility.kt        # display semantics, keypad text size (a11y/i18n bugs #78–#82)
+├── TipSplitViewModel.kt    # Tip & split UiState + events (UI state bugs #83–#87)
+├── TipSplitDialog.kt       # Tip & split dialog (long-press %)
 │  History
 ├── History.kt              # HistoryManager (prefs, callbackFlow), HistoryList, async stats
 ├── HistoryNav.kt           # Navigation Compose NavHost: list → detail (bugs #48–#52)
 ├── ScrollToTop.kt          # "↑ Top" button in History
+├── HistorySearch.kt        # search + filter chips, Flow pipeline (Flow bugs #88–#92)
 ├── BackupWorker.kt         # @HiltWorker history backup, BackupStore, BackupScheduler (bugs #73–#77)
 │  Settings and DI
-├── SettingsScreen.kt       # dark mode, haptics, decimal places, session stats, backup section
+├── SettingsScreen.kt       # dark mode, haptics, decimal places, session stats, backup + export sections
 ├── SettingsViewModel.kt    # @HiltViewModel for Settings
 ├── BackupSection.kt        # "Back up now" button + status
+├── ExportSection.kt        # "Export history" + "Remind me" buttons (permissions bugs #93–#97)
+├── ExportService.kt        # dataSync foreground service writing history_export.csv
+├── Notifications.kt        # channel, progress/done/backup notifications, PendingIntents
+├── ReviewReminder.kt       # exact alarm + ReminderReceiver
 ├── Di.kt                   # Hilt modules, qualifiers, AppEntryPoint service locator
 └── Services.kt             # SessionTracker, SettingsStore (+ impls), ClipboardHelper
 
