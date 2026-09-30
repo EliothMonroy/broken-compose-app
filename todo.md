@@ -299,7 +299,55 @@ The app is only partly moved to Hilt. `CalcApp` is annotated `@HiltAndroidApp`, 
 
 ## Networking (Retrofit / OkHttp)
 
-<!-- placeholder: bugs #58–#62 (networking) -->
+The `$` button in the top bar opens a small currency converter. It converts the number on the display from USD, EUR or MXN using the free [Frankfurter](https://frankfurter.dev) API. It's built with Retrofit, OkHttp and kotlinx.serialization, and wired up with Hilt in `NetworkModule.kt`. Watch the traffic with `adb logcat -s okhttp.OkHttpClient`. The exact rates change every day, so your numbers will differ from the ones below.
+
+> ⚠️ **#58 crashes the converter as soon as it opens.** Fix it first. #59–#62 only show up after that.
+
+- [ ] **58. Opening the currency converter crashes the app**
+  - Steps: type `100`, then tap `$` in the top bar.
+  - Expected: a dialog shows 100 USD in EUR and MXN.
+  - Actual: the app crashes with `SecurityException: Permission denied (missing INTERNET permission?)`.
+  <details><summary>Hint</summary>Which permission does every app that talks to a server need, and where is it declared? It's a "normal" permission, so there's no runtime prompt. Why does this only fail at runtime? Bonus: on older Android versions the same mistake can show up as an <code>IOException</code> instead (for example <code>SocketException: socket failed: EPERM</code>), and then the dialog's <code>catch</code> would show "No internet connection" on a phone that is online. Why is that message misleading?</details>
+
+- [ ] **59. Tapping "Retry" in the converter crashes the app** *(you'll only see this after fixing #58)*
+  - Steps: turn on airplane mode (`adb shell cmd connectivity airplane-mode enable`). Type `100`, tap `$`. The dialog shows "No internet connection". Tap **Retry**. Turn airplane mode off again afterwards (`… airplane-mode disable`).
+  - Expected: it tries again and shows the error again, without freezing or crashing.
+  - Actual: the app crashes with `android.os.NetworkOnMainThreadException`.
+  <details><summary>Hint</summary>Compare how the <code>LaunchedEffect</code> calls <code>loadRates</code> with how the Retry button calls it. Which thread runs a click handler? <code>Call.execute()</code> blocks the calling thread. Interview follow-ups: <code>execute()</code> vs <code>enqueue()</code> vs a <code>suspend</code> function in the Retrofit interface, and where retry logic should live (a ViewModel with <code>viewModelScope</code>, not the composable).</details>
+
+- [ ] **60. Converting `0` crashes the app** *(you'll only see this after fixing #58)*
+  - Steps: force-stop and reopen the app, so nothing is cached. With the display at `0`, tap `$`. Also try it with an unfinished expression such as `5+3` on the display.
+  - Expected: a friendly message such as "Enter a number above 0", ideally without sending a request at all.
+  - Actual: the app crashes with `NullPointerException` in `loadRates`. The OkHttp log shows `<-- 422` and `{"message":"invalid amount"}`.
+  <details><summary>Hint</summary>What does <code>Response.body()</code> return when the status code isn't 2xx? <code>!!</code> turns that into a crash, and the <code>catch</code> only handles <code>IOException</code>. Also, why is the amount <code>0</code> for <code>5+3</code>? Look at <code>toDoubleOrNull() ?: 0.0</code>. Interview angle: with a <code>suspend</code> Retrofit function you'd get an <code>HttpException</code> instead. How would you turn network errors, HTTP errors and bad input into one UI state (Loading / Success / Error)?</details>
+
+- [ ] **61. Switching the converter to EUR or MXN crashes the app** *(you'll only see this after fixing #58)*
+  - Steps: type `100`, tap `$`, then tap **EUR** (or **MXN**) at the top of the dialog.
+  - Expected: it shows 100 EUR in USD and MXN.
+  - Actual: the app crashes with `kotlinx.serialization.MissingFieldException: Field 'EUR' is required for type with serial name '…Rates', but it was missing at path: $.rates` (`'MXN'` if you tapped MXN).
+  <details><summary>Hint</summary>Put the response body from the OkHttp log next to the <code>Rates</code> class. Which currency does the API leave out, and which field is required? Why does it work for USD? Why doesn't the <code>catch (e: IOException)</code> catch it? Interview angle: <code>ignoreUnknownKeys</code> only helps with <i>extra</i> keys, not <i>missing</i> ones. How would you model a JSON object whose keys depend on the request?</details>
+
+- [ ] **62. Converting a different number shows the old result** *(you'll only see this after fixing #58)*
+  - Steps: force-stop and reopen the app. Type `100`, tap `$` (shows about `1812 MXN`), then **Close**. Press `C`, type `5`, tap `$` again.
+  - Expected: about `90 MXN` for 5 USD.
+  - Actual: the title says "Convert 5", but it still shows the result for 100. The OkHttp log shows no new request.
+  <details><summary>Hint</summary>The request includes the amount, so what is <code>rateCache</code> keyed by? A cache key has to include everything that changes the response. The other option is to cache the rate for 1 unit and multiply locally. Also: when does this cache ever expire, and is a plain <code>HashMap</code> safe when it's written from <code>Dispatchers.IO</code> and read from the main thread? Interview angle: in-memory cache vs OkHttp's HTTP cache (<code>Cache-Control</code>) vs a database, and cache invalidation.</details>
+
+**Bad practices in this area**
+
+- [ ] The `@Provides` functions in `NetworkModule` aren't `@Singleton`, so every `ratesApi()` call builds a new `Retrofit` and a new `OkHttpClient`, each with its own connection pool and threads.
+- [ ] `HttpLoggingInterceptor.Level.BODY` is on in every build, release too. It logs full responses (a privacy risk) and slows requests down. Tie it to `BuildConfig.DEBUG`.
+- [ ] A blocking `Call<T>` with `execute()`, wrapped in `withContext(Dispatchers.IO)`, instead of a `suspend` function in the Retrofit interface.
+- [ ] The composable fetches its own dependencies with `EntryPointAccessors` and does the networking itself. There's no ViewModel, no repository, and no single UI state (three separate `var`s instead).
+- [ ] Global mutable state again: `showConverter`, `converterAmount` (written during composition in `CalculatorScreen`) and a global `rateCache` that never expires.
+- [ ] Every `IOException` is shown as "No internet connection". Nothing checks connectivity, and the real cause is only in logcat.
+- [ ] `Double` for money, `String.format` without a `Locale`, and a hard-coded base URL, currency list, strings and colours.
+
+**Stretch goals**
+
+- [ ] Write JVM tests for `RatesApi` with `MockWebServer` (already a test dependency): a 200 response, a 422, the EUR-based body from #61, and malformed JSON.
+- [ ] Move the converter to a `@HiltViewModel` that exposes `StateFlow<ConverterUiState>`, with `suspend` Retrofit calls and a repository that owns the cache.
+- [ ] Show the last cached rates with their date when offline, and use `ConnectivityManager` to tell "offline" apart from other errors.
 
 ## Lifecycle and process death
 

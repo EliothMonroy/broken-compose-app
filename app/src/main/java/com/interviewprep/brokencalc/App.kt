@@ -29,6 +29,9 @@ fun App() {
         } else if (currentScreen == "settings") {
             SettingsScreen()
         }
+        if (showConverter) {
+            ConverterDialog()
+        }
     }
 }
 
@@ -54,6 +57,11 @@ fun TopBar() {
                 .weight(1f)
                 .padding(start = 8.dp)
         )
+        if (currentScreen == "calculator") {
+            TextButton(onClick = { showConverter = true }) {
+                Text("$", color = Color.White)
+            }
+        }
         if (currentScreen != "calculator") {
             TextButton(onClick = { currentScreen = "calculator" }) {
                 Text("Calc", color = Color.White)

@@ -65,6 +65,7 @@ fun CalculatorScreen() {
 
     var displayText = vm.display
     if (displayText == "") displayText = "0"
+    converterAmount = displayText
 
     Column(modifier = Modifier.fillMaxSize()) {
         Column(
