@@ -4,7 +4,7 @@
 
 **Broken Calc** is a Jetpack Compose calculator built for **Android interview practice**. It is *intentionally* buggy and *intentionally* written with bad Android/Kotlin/Compose practices. The user fixes these problems themselves to practise debugging, refactoring and explaining their reasoning.
 
-`todo.md` is the source of truth for the planted bugs (numbered 1–42), the bad-practice checklist, and stretch goals.
+`todo.md` is the source of truth for the planted bugs (numbered 1–87), the bad-practice checklist, and stretch goals.
 
 ## Rules for AI agents
 
@@ -26,7 +26,7 @@
 - `minSdk 24`, `targetSdk`/`compileSdk 36`
 - Persistence: `SharedPreferences` (`calc_prefs`)
 - DI: Hilt 2.57 with KSP, only partly adopted on purpose (see bugs #38–#42)
-- No navigation library, no tests (on purpose)
+- More libraries are declared in `app/build.gradle.kts` for the newer bug categories: Room, Navigation Compose, Retrofit/OkHttp with kotlinx.serialization, WorkManager with hilt-work, and test libraries. Each one is used by its own section in `todo.md`.
 
 ## Build and run
 

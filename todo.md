@@ -285,6 +285,42 @@ The app is only partly moved to Hilt. `CalcApp` is annotated `@HiltAndroidApp`, 
   - Actual: `NullPointerException: Can't toast on a thread that has not called Looper.prepare()`.
   <details><summary>Hint</summary>Read <code>AppModule</code> carefully. The function names say one thing, but the qualifiers say another. <code>@MainDispatcher</code> actually provides <code>Dispatchers.IO</code>, and the clipboard write is running on Main. How could a test catch a swapped binding like this?</details>
 
+## Room
+
+<!-- placeholder: bugs #43–#47 (room) -->
+
+## Navigation Compose
+
+<!-- placeholder: bugs #48–#52 (navigation) -->
+
+## Testing
+
+<!-- placeholder: bugs #53–#57 (testing) -->
+
+## Networking (Retrofit / OkHttp)
+
+<!-- placeholder: bugs #58–#62 (networking) -->
+
+## Lifecycle and process death
+
+<!-- placeholder: bugs #63–#67 (lifecycle) -->
+
+## Performance and recomposition
+
+<!-- placeholder: bugs #68–#72 (performance) -->
+
+## WorkManager
+
+<!-- placeholder: bugs #73–#77 (workmanager) -->
+
+## Release builds and R8
+
+<!-- placeholder: bugs #78–#82 (r8) -->
+
+## Accessibility and i18n
+
+<!-- placeholder: bugs #83–#87 (a11y-i18n) -->
+
 ---
 
 ## Bad practices to refactor
