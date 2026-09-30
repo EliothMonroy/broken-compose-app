@@ -83,6 +83,8 @@ fun SettingsScreen() {
             modifier = Modifier.padding(top = 32.dp)
         )
 
+        BackupSection()
+
         Text(
             text = "Broken Calc v1.0",
             color = Color.Gray,

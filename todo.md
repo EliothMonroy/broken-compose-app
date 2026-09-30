@@ -560,7 +560,59 @@ To simulate process death: press Home, run `adb shell am kill com.interviewprep.
 
 ## WorkManager
 
-<!-- placeholder: bugs #73–#77 (workmanager) -->
+The app now backs up your history to a file (`files/history_backup.txt`). A "daily backup" is scheduled every time the app starts, and Settings has a **History backup** section with a "Back up now" button and a status line. The code is in `BackupWorker.kt`, `BackupSection.kt` and `CalcApp.kt`. These bugs cover how WorkManager is set up with Hilt, unique work, constraints, input data, and what a worker can rely on when it runs in the background.
+
+> ⚠️ The backup controls live in Settings, so **fix #38 first**. #77 only shows up after #73 is fixed.
+
+> ⚠️ Most of these depend on whether the device is charging. On an emulator you can fake it: plug in with `adb shell dumpsys battery set ac 1` and `adb shell dumpsys battery set status 2`, unplug with `adb shell dumpsys battery unplug` and `adb shell dumpsys battery set status 3`. Run `adb shell dumpsys battery reset` when you're done. Android Studio's **App Inspection → Background Task Inspector** shows every worker and its state.
+
+- [ ] **73. "Back up now" always fails**
+  - Steps: make sure the device is charging (see above). Run `adb logcat -s WM-WorkerFactory WM-WorkerWrapper` and leave it running. Open Settings and tap **Back up now**.
+  - Expected: the status says `SUCCEEDED` and "Last backup" shows the time and the number of entries.
+  - Actual: the status says `FAILED` and "Last backup" stays `never`. Logcat shows `Could not instantiate com.interviewprep.brokencalc.BackupWorker` with `NoSuchMethodException: …BackupWorker.<init> [class android.content.Context, class androidx.work.WorkerParameters]`. The daily backup fails the same way.
+  <details><summary>Hint</summary><code>CalcApp</code> implements <code>Configuration.Provider</code> with the <code>HiltWorkerFactory</code>, so why is the default factory creating the worker? Open the <b>Merged Manifest</b> tab for <code>AndroidManifest.xml</code> and look for <code>androidx.startup.InitializationProvider</code>. WorkManager's own initializer runs before <code>Application.onCreate</code> with a default <code>Configuration</code>, and then your provider is never asked. The default factory can only call a <code>(Context, WorkerParameters)</code> constructor, and an <code>@AssistedInject</code> worker with extra dependencies doesn't have one. Interview angles: on-demand initialization, why this fails at runtime and not at compile time, and how you'd catch it in a test (<code>WorkManagerTestInitHelper</code>).</details>
+
+- [ ] **74. Every app launch adds another "daily" backup**
+  - Steps: open the app and force-stop it three times. Then run `adb shell dumpsys jobscheduler com.interviewprep.brokencalc | grep -c "JOB .*BackupWorker"`. You can also look at the Background Task Inspector.
+  - Expected: `1`. There is one daily backup, however many times the app starts.
+  - Actual: `3`, and one more for every launch. Once #73 is fixed and the device is charging, a backup also runs on every launch (watch the "Last backup" time).
+  <details><summary>Hint</summary>Look at <code>BackupScheduler.scheduleDailyBackup</code> and where it's called. WorkManager saves work in its own database, so it survives restarts. Plain <code>enqueue</code> always adds a new request. Look at <code>enqueueUniquePeriodicWork</code> and <code>ExistingPeriodicWorkPolicy</code>, and be ready to explain <code>KEEP</code> vs <code>UPDATE</code> vs <code>CANCEL_AND_REENQUEUE</code>. Follow-up: how would you clean up the duplicates that are already scheduled on users' phones?</details>
+
+- [ ] **75. "Back up now" does nothing unless the phone is charging**
+  - Steps: unplug the device (see above). Open Settings and tap **Back up now**. Wait a minute, and tap it again.
+  - Expected: a backup the user asked for runs right away.
+  - Actual: the status stays `ENQUEUED` for as long as the device is unplugged, and extra taps are ignored. It only runs once you plug the device in.
+  <details><summary>Hint</summary>Which constraints does <code>backupNow</code> use, and who were they written for? "Only when charging" is a good rule for a nightly job but not for something the user just tapped. Also look at <code>ExistingWorkPolicy.KEEP</code>: while the old request is stuck, every new tap is dropped, and the old request still holds the <b>old</b> history snapshot. When is <code>REPLACE</code> better? For user-initiated work, look at <code>setExpedited</code> and which constraints it allows.</details>
+
+- [ ] **76. "Back up now" crashes once the history is long**
+  - Steps: `1`, `÷`, `3`, `=`, then press `=` about 250 more times. Each press adds another history entry. On a 1080×2400 screen you can run `for i in $(seq 250); do adb shell input tap 671 1970; done`. Then open Settings and tap **Back up now**.
+  - Expected: the backup is queued, however long the history is.
+  - Actual: the app crashes with `IllegalStateException: Data cannot occupy more than 10240 bytes when serialized`. With about 200 entries it still works.
+  <details><summary>Hint</summary>Look at <code>setInputData</code> in <code>backupNow</code>. <code>Data</code> is meant for small things like IDs and flags, and it has a hard 10 KB limit (<code>Data.MAX_DATA_BYTES</code>). The crash happens on the main thread while <b>building</b> the request, not in the worker. Pass a reference instead, and let the worker read the data from where it's stored. Why is "take a snapshot" still a reasonable goal, and how else could you get it?</details>
+
+- [ ] **77. The daily backup wipes the backup file when the app isn't open** *(you'll only see this after fixing #73)*
+  - Steps:
+    1. Plug in. Do three calculations, then Settings → **Back up now**. "Last backup" shows `3 entries`.
+    2. Unplug. Press Home, then `adb shell am kill com.interviewprep.brokencalc`. Reopen the app, press Home and run `am kill` again. Reopening schedules a new daily backup (#74) that waits for the charger.
+    3. Plug in. Find that backup's job: in `adb shell dumpsys jobscheduler com.interviewprep.brokencalc`, it's the `BackupWorker` job whose "Unsatisfied constraints" is only `CHARGING`. Run it with `adb shell cmd jobscheduler run -f -n androidx.work.systemjobscheduler com.interviewprep.brokencalc <job id>`. On a real phone, plugging it in overnight does the same thing.
+    4. Run `adb logcat -d -s BackupWorker` and `adb shell run-as com.interviewprep.brokencalc cat /data/data/com.interviewprep.brokencalc/files/history_backup.txt`.
+  - Expected: the backup still has your 3 entries.
+  - Actual: logcat shows `Backing up 0 entries`, and the backup file is empty. The good backup has been overwritten.
+  <details><summary>Hint</summary>When JobScheduler starts the app to run a worker, only <code>Application.onCreate</code> runs. No Activity is created. Who fills <code>HistoryManager.items</code>? A worker has to load its data from the place it's stored (for example an injected repository), not from in-memory globals. Follow-ups: how would you test this (<code>TestListenableWorkerBuilder</code> with a fake store)? Should a backup with 0 entries be allowed to replace a non-empty one?</details>
+
+**Bad practices in this area**
+
+- [ ] Work is scheduled from `Application.onCreate` with no unique name, and `BackupScheduler` is a global `object` that can't be injected or faked.
+- [ ] The worker reads global mutable state (`HistoryManager.items`) from a background thread instead of using an injected repository.
+- [ ] `BackupSection` calls `WorkManager.getInstance` and reads a file (`readLines()`) on the main thread during composition, instead of a ViewModel exposing a `StateFlow`.
+- [ ] `SimpleDateFormat` without a `Locale`, and hard-coded strings in the backup UI.
+- [ ] No tests for the worker or for the scheduling.
+
+**Stretch goals**
+
+- [ ] Test the worker with `TestListenableWorkerBuilder` and a fake `BackupStore`.
+- [ ] Test scheduling with `WorkManagerTestInitHelper` and `TestDriver` (`setAllConstraintsMet`, `setPeriodDelayMet`), including "launching twice keeps one daily backup".
+- [ ] Add a "Restore from backup" button, and show progress with `setProgress`.
 
 ## Release builds and R8
 
