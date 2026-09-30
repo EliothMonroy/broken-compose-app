@@ -499,7 +499,60 @@ The `$` button in the top bar opens a small currency converter. It converts the 
 
 ## Lifecycle and process death
 
-<!-- placeholder: bugs #63–#67 (lifecycle) -->
+These bugs are about what happens when the Activity stops, gets recreated, or when Android kills the whole process in the background. A classic interview question is "what survives a rotation, and what survives process death?"
+
+To shake the emulator, run `adb emu sensor set acceleration 0:40:0` and then `adb emu sensor set acceleration 0:9.81:0`. On a real phone, just shake it.
+
+To simulate process death: press Home, run `adb shell am kill com.interviewprep.brokencalc`, then reopen the app from Recents (or with `adb shell am start -n com.interviewprep.brokencalc/.MainActivity`). You can also use the "Terminate application" button in Android Studio's Logcat while the app is in the background. A force-stop is **not** the same thing, because it throws away the saved state too.
+
+> ⚠️ **#67 crashes the app** when it rotates or goes to the background after a shake. While you test #63, switch screens with the top bar instead of rotating, or shake twice (clear, then restore) before you rotate.
+
+> ⚠️ The "Welcome back" toasts are long and they queue up, so with #64 they can keep showing for a while. `adb logcat -s WelcomeBack` makes them easier to count.
+
+- [ ] **63. One shake fires several times, even on other screens**
+  - Steps: run `adb logcat -s Shake`. Open History, go back to Calc, and do that once more. Type `12`, then shake.
+  - Expected: one `Shake detected` line and one toast per shake. Shaking on History does nothing.
+  - Actual: one line per visit to the calculator (3 here). Open History and shake: the "Cleared" or "Restored" toasts still show up. `adb shell dumpsys sensorservice` lists one accelerometer connection from `ShakeToClearKt` for every visit.
+  <details><summary>Hint</summary>Look at the <code>DisposableEffect</code> in <code>ShakeToClear.kt</code>. What is <code>onDispose</code> for? Every old listener also holds on to its old <code>vm</code> and the <code>Context</code> it captured. After a rotation that context is a destroyed Activity, which is a memory leak. Follow-up: should a sensor keep running while the app is in the background? Compare tying it to composition with tying it to <code>ON_START</code>/<code>ON_STOP</code>, for example with <code>LifecycleStartEffect</code>.</details>
+
+- [ ] **64. The "Welcome back" toast shows up over and over**
+  - Steps: open the app, type `123`, press Home, wait at least 5 seconds, then come back. Watch `adb logcat -s WelcomeBack`.
+  - Expected: one "Welcome back!" toast.
+  - Actual: four toasts, each with a different "Last input" (`0`, `1`, `12`, `123`). The more you type before leaving, the more toasts you get.
+  <details><summary>Hint</summary><code>WelcomeBack</code> calls <code>lifecycle.addObserver</code> directly in the composable body. That runs on every recomposition, and nothing ever calls <code>removeObserver</code>. Each observer captured the <code>lastInput</code> from its own recomposition, which is why the texts differ. Side effects belong in effects: <code>DisposableEffect(lifecycleOwner)</code> with <code>removeObserver</code> in <code>onDispose</code>, or <code>LifecycleEventEffect</code> from <code>lifecycle-runtime-compose</code>. Once there's only one observer, how does it see the latest <code>lastInput</code>? (Look up <code>rememberUpdatedState</code>.)</details>
+
+- [ ] **65. "Active time" keeps counting while the app is in the background**
+  - Steps: open the app and wait 10 seconds. Press Home, wait 15 seconds, then come back and read "Active time" in the toast. You can also watch `adb logcat -s UsageTimer` after pressing Home.
+  - Expected: about 10 s. The timer pauses while the app isn't visible.
+  - Actual: about 25 s. `UsageTimer` keeps logging every second while the app is in the background.
+  <details><summary>Hint</summary><code>startUsageTimer()</code> collects a flow inside <code>lifecycleScope.launch</code>. <code>lifecycleScope</code> is only cancelled in <code>onDestroy</code>, so the collection keeps going while the Activity is stopped. Look at <code>repeatOnLifecycle(Lifecycle.State.STARTED)</code>, <code>flowWithLifecycle</code>, and <code>collectAsStateWithLifecycle</code> in Compose. Be ready to explain why <code>launchWhenStarted</code> was deprecated. Watch out: where you declare <code>last</code> matters. If it lives outside the restarted block, the first tick after coming back still adds the whole gap.</details>
+
+- [ ] **66. After process death, "Welcome back" says you were away for about 20,000 days**
+  - Steps: open the app, press Home, run `adb shell am kill com.interviewprep.brokencalc`, then reopen the app from Recents.
+  - Expected: the toast shows how long you were really gone (a few seconds).
+  - Actual: "Welcome back! You were away 20726 days", which is the time since 1 January 1970.
+  <details><summary>Hint</summary>Half of this feature's state survives process death and half doesn't. <code>wasAway</code> is in <code>rememberSaveable</code>, so it comes back from the saved-instance <code>Bundle</code>. <code>leftAt</code> is a plain top-level <code>var</code>, so the new process starts it at <code>0</code> again. A force-stop hides the bug because it throws away the saved state too. Interview question: which of <code>remember</code>, <code>rememberSaveable</code>, <code>SavedStateHandle</code> and disk storage survive a rotation, process death, and a force-stop? And why doesn't your calculator input come back either (see #26)?</details>
+
+- [ ] **67. After a shake, rotating or leaving the app crashes it**
+  - Steps: type `23`, shake once so the display clears, then rotate the device or press Home.
+  - Expected: the app keeps running, and shaking again after a rotation still brings back `23`.
+  - Actual: `IllegalStateException: MutableState(value=ClearedInput(text=23, …)) cannot be saved using the current SaveableStateRegistry.` Shaking a second time before you leave (so the display is restored) avoids the crash.
+  <details><summary>Hint</summary><code>rememberSaveable</code> can only hold what fits in a <code>Bundle</code>: primitives, <code>String</code>, <code>Parcelable</code>, <code>Serializable</code> and so on. <code>ClearedInput</code> is a plain data class. The check happens when the state is <b>saved</b> in <code>onSaveInstanceState</code>, not when you write to it, so everything looks fine until then. Fix it with <code>@Parcelize</code> (needs the <code>kotlin-parcelize</code> plugin), a custom <code>Saver</code> (<code>listSaver</code> or <code>mapSaver</code>), or by saving only the <code>String</code>. Why can't the compiler catch this?</details>
+
+**Bad practices in this area**
+
+- [ ] Listeners, lifecycle observers and flow collection are started with no matching stop. Every "register" needs an "unregister" at the mirrored lifecycle point (`onStart`/`onStop`, or composition enter/leave).
+- [ ] Sensor listeners and observers capture an Activity `Context` and outlive it.
+- [ ] Top-level `var`s (`leftAt`, `activeMillis`) hold state that should be saved or persisted.
+- [ ] Durations are measured with the wall clock (`System.currentTimeMillis()`), which jumps when the user changes the time. `SystemClock.elapsedRealtime()` doesn't.
+- [ ] A ticker logs every second, forever.
+
+**Stretch goals**
+
+- [ ] Write a Compose UI test with `StateRestorationTester` that catches #67 without rotating a device.
+- [ ] Turn on "Don't keep activities" in Developer options and use the app normally. What else loses state?
+- [ ] Use `ActivityScenario.recreate()` in an instrumented test to check that the shake undo survives a configuration change.
+- [ ] Add LeakCanary and confirm that #63 leaks the old Activity after a rotation.
 
 ## Performance and recomposition
 

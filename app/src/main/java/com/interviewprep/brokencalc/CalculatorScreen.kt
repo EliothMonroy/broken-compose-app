@@ -64,6 +64,9 @@ fun CalculatorScreen() {
         }
     }
 
+    ShakeToClear(vm)
+    WelcomeBack(vm.display)
+
     var displayText = vm.display
     if (displayText == "") displayText = "0"
     converterAmount = displayText
