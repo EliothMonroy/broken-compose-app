@@ -725,7 +725,58 @@ Useful commands (all need API 33+ for the per-app language):
 
 ## UI state and one-off events
 
-<!-- placeholder: bugs #83–#87 (ui-state) -->
+**Long-press `%`** to open **Tip & split**. It takes the number on the display as the bill. You pick a tip, add the people who are paying, tap Calculate, and copy a summary. It's built the "modern" way: its own ViewModel (`TipSplitViewModel.kt`) exposes a `StateFlow<TipSplitUiState>` plus a stream of one-off events, and the dialog is in `TipSplitDialog.kt`. These bugs cover unidirectional data flow: what belongs in state and what's an event, immutable state, impossible states, and updating state safely from coroutines.
+
+Run `adb logcat -s TipSplit` while you test. It logs when the ViewModel sends an event, when the dialog receives one, when a calculation finishes, and when the "copied" toast is shown.
+
+> ⚠️ **#86 hides the names you add** until you close and reopen the dialog. The "Split between N people" line is right, so trust that. Also, the calculator clears itself 30 seconds after it opens (#30), and rotating loses the calculator input (#26), which the dialog then reads as a bill of `0`. So type the bill and open the dialog right away, and don't rotate while it's open.
+
+- [ ] **83. "Summary copied" shows up again later, but not when you copy a second time**
+  - Steps: type `50`, long-press `%`, add `Ana`, tap **Calculate**, then **Copy summary**. Now open History and come back to Calc, or rotate the device. Then long-press `%` again, tap **Calculate** and **Copy summary** once more.
+  - Expected: one "Summary copied" toast for each tap on Copy summary, and none at any other time.
+  - Actual: the first copy shows the toast. Coming back from History shows it again, and so does every rotation, even though nothing was copied. The second real copy shows no toast at all. Logcat has one `Showing copied toast` line per visit to the calculator screen.
+  <details><summary>Hint</summary>Look at <code>summaryCopied</code> in <code>TipSplitUiState</code>. Who ever sets it back to <code>false</code>? State describes what the screen looks like <i>now</i>, and a <code>StateFlow</code> gives its current value to every new collector, so anything in it "happens again" whenever the UI is rebuilt. The <code>LaunchedEffect</code> key also only changes the first time. Two common answers: send it as a one-off event, or keep it in state and have the UI report back that it has shown the message (for example <code>onCopiedMessageShown()</code>), which is what Android's architecture guide recommends. Interview angle: "state vs events". What are the trade-offs of each, and what happens to a toast that should show while the app is in the background?</details>
+
+- [ ] **84. Opening Tip & split with no bill doesn't warn you**
+  - Steps: run `adb logcat -s TipSplit`. Press `C` so the display shows `0`, then long-press `%`.
+  - Expected: a "Type the bill on the calculator first" toast, and the dialog closes.
+  - Actual: the dialog stays open with `Bill: $0.00`, and Calculate happily gives `$0.00 each`. Logcat shows `No bill to split` from the ViewModel, but never `Got event`.
+  <details><summary>Hint</summary>Look at how <code>_events</code> is created, and compare <b>when</b> <code>start()</code> emits with when the dialog starts collecting. A <code>MutableSharedFlow()</code> with no replay and no buffer simply drops a value if nobody is collecting at that moment. Both <code>LaunchedEffect</code>s start in the same frame, in the order they're written. Swapping them makes it work, but why is that a fragile fix? Compare <code>Channel(Channel.BUFFERED).receiveAsFlow()</code>, <code>MutableSharedFlow(replay = …)</code> or <code>extraBufferCapacity</code>, and putting the message in state. Follow-ups: what's the difference between <code>emit</code> and <code>tryEmit</code> here? Can a <code>Channel</code> event still get lost, for example when the collector is cancelled right after receiving it?</details>
+
+- [ ] **85. The error, the spinner and an old result all show at the same time**
+  - Steps: type `50`, long-press `%`. Without adding anyone, tap **Calculate**. You get "Add at least one person". Now add `Ana` and tap **Calculate** again, then once more.
+  - Expected: while it's calculating, only the spinner shows. When it's done, only `$57.50 each` shows.
+  - Actual: the spinner shows together with the red "Add at least one person". When it finishes, `$57.50 each` appears right under that error, which stays there. The third time, the spinner, the error and the old result are all on screen together.
+  <details><summary>Hint</summary><code>isLoading</code>, <code>error</code> and <code>perPerson</code> are three independent fields, and each update only changes one of them. That type allows eight combinations, and most of them make no sense. How would you model "nothing yet / loading / error / result" so the impossible combinations can't even be written? A <code>sealed interface</code> is the usual interview answer. Follow-up: should the old result stay visible while a new one is calculated? If yes, how would you model that on purpose?</details>
+
+- [ ] **86. People you add don't show up in the list**
+  - Steps: type `50`, long-press `%`. Type `Ana` in Name and tap **Add**, then add `Ben`. Try tapping a different tip too.
+  - Expected: `Ana` and `Ben` appear in the list, each with a `✕` to remove them.
+  - Actual: "Split between 2 people" counts them, but the list stays empty, even after changing the tip. Close the dialog and open it again, and they're both there. Removing someone with `✕` has the same problem.
+  <details><summary>Hint</summary>Look at <code>addPerson</code>. <code>_state.value = _state.value</code> sets the very same object again, and a <code>StateFlow</code> only emits when the new value isn't equal to the old one. The count only updates because clearing the Name field recomposes the dialog. <code>PeopleList</code> still gets the same <code>MutableList</code> object every time, and Compose skips a composable when its unstable parameters are the same instance. Keep state immutable: a read-only <code>List</code> and <code>copy(people = people + name)</code>. Interview angle: why immutable state matters for <code>StateFlow</code>, <code>distinctUntilChanged</code> and Compose stability. What do <code>@Immutable</code> and <code>kotlinx.collections.immutable</code> give you?</details>
+
+- [ ] **87. Changing the tip while it's calculating gets undone**
+  - Steps: type `50`, long-press `%` and add `Ana`. Tap **Calculate**, and while the spinner is showing, tap `20%`. The dialog grows a little when the spinner appears, so the chips move slightly.
+  - Expected: the tip stays at 20%, and the result is for 20% (`$60.00 each`).
+  - Actual: the header says `+ 20% tip` for a moment, then jumps back to `+ 15% tip`, and the result is `$57.50 each`. Logcat says `Calculated with 15% tip`.
+  <details><summary>Hint</summary><code>calculate()</code> reads the state once, waits, and then writes back a copy of that <b>old</b> snapshot. Anything that changed in between is lost. That's the classic lost update from "read, change, write" with a suspension point in the middle. <code>MutableStateFlow.update { it.copy(…) }</code> does the read and the write in one atomic step. But <code>update</code> alone still leaves a result for the old tip on screen. Should a tip change cancel and restart the calculation (keep the <code>Job</code>, or use <code>mapLatest</code>/<code>collectLatest</code> on the inputs), or should the tip chips be disabled while it's loading? Follow-up: is <code>_state.value = _state.value.copy(…)</code> safe from two threads even without a <code>delay</code>?</details>
+
+**Bad practices in this area**
+
+- [ ] `TipSplitDialog` takes the whole `TipSplitViewModel` instead of state and lambdas, so it can't be previewed or tested on its own.
+- [ ] The ViewModel comes from `viewModel()` in `TipSplitHost`, so it's scoped to the Activity. The dialog's tip, people and flags outlive the dialog. Is that on purpose?
+- [ ] There's no single entry point for user actions (an `onAction(TipSplitAction)`), so "MVI" is really a bag of public functions.
+- [ ] `collectAsState()` instead of `collectAsStateWithLifecycle()`.
+- [ ] Money is a `Double`, formatted with `String.format("%.2f")` and no `Locale`, and nobody decides who pays the leftover cent when $10 is split three ways.
+- [ ] The bill is read from the calculator display string, with commas stripped by hand.
+- [ ] A fake 1.5 s `delay` lives inside the ViewModel, hard-coded strings, and "Split between 1 people".
+- [ ] Like Constants, the only way to open it is a hidden long-press controlled by a global flag (`showTipSplit`), with no accessibility action.
+
+**Stretch goals**
+
+- [ ] Write JVM tests for `TipSplitViewModel` with `kotlinx-coroutines-test` (`runTest`, `Dispatchers.setMain`, `advanceTimeBy`). Include one that changes the tip during `calculate()` (#87) and one that starts collecting events after `start()` (#84).
+- [ ] Move the logic into a pure `reduce(state, action): TipSplitUiState` function and test it without coroutines at all.
+- [ ] Save the tip and the people in `SavedStateHandle` so they survive process death.
 
 ## Flow operators
 
