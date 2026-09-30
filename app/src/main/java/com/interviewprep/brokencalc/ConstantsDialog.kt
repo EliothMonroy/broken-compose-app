@@ -134,7 +134,7 @@ fun ConstantsDialog(onPick: (Double) -> Unit, onDismiss: () -> Unit) {
                             valueText = ""
                             editing = null
                         } catch (e: SQLiteConstraintException) {
-                            Toast.makeText(context, n + " already exists", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, context.getString(R.string.constant_exists, n), Toast.LENGTH_SHORT).show()
                         }
                     }
                 }

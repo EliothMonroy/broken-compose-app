@@ -614,13 +614,61 @@ The app now backs up your history to a file (`files/history_backup.txt`). A "dai
 - [ ] Test scheduling with `WorkManagerTestInitHelper` and `TestDriver` (`setAllConstraintsMet`, `setPeriodDelayMet`), including "launching twice keeps one daily backup".
 - [ ] Add a "Restore from backup" button, and show progress with `setProgress`.
 
-## Release builds and R8
-
-<!-- placeholder: bugs #78–#82 (r8) -->
-
 ## Accessibility and i18n
 
-<!-- placeholder: bugs #83–#87 (a11y-i18n) -->
+Someone started on accessibility and a Spanish translation. Two strings now live in `res/values/strings.xml`, with a Spanish copy in `res/values-es/strings.xml`. The manifest declares the app's languages (`res/xml/locales_config.xml`), so Android 13+ shows a per-app **Language** setting, and it now says the app supports right-to-left (RTL) languages. `Accessibility.kt` adds TalkBack info for the display and a fixed size for the keypad labels. These bugs cover plurals, translations, RTL layouts, font scaling and screen readers.
+
+Useful commands (all need API 33+ for the per-app language):
+- Change the app language: `adb shell cmd locale set-app-locales com.interviewprep.brokencalc --locales es-MX` (or `ar` for Arabic). Reset it with `--locales ""`. On the device: Settings → Apps → Broken Calc → Language.
+- Change the font size: `adb shell settings put system font_scale 2.0`. Reset it with `font_scale 1.0`.
+- See what TalkBack sees without turning it on: `adb shell uiautomator dump /sdcard/u.xml && adb shell cat /sdcard/u.xml`, then look at the `text` and `content-desc` of each node. Android Studio's Layout Inspector and the Accessibility Scanner app work too.
+
+> ⚠️ Changing the language or font size recreates the Activity. Your input is lost (#26) and History entries get duplicated (#23). So change the setting **first**, then follow the steps. Clearing the app's data also resets its language.
+
+- [ ] **78. History says "1 calculations" (and "1 cálculos" in Spanish)**
+  - Steps: switch the app to Spanish (`--locales es-MX`). Press `2`, `+`, `2`, `=`, then open History. Do the same in English.
+  - Expected: `1 cálculo` in Spanish and `1 calculation` in English. `2 cálculos` / `2 calculations` for two.
+  - Actual: `1 cálculos` and `1 calculations`.
+  <details><summary>Hint</summary>Look at <code>history_count</code> in both <code>strings.xml</code> files. Plurals can't be built by pasting a number in front of a word, and every language has its own rules (English has two forms, Arabic has six). Look at <code>&lt;plurals&gt;</code>, <code>pluralStringResource</code> and <code>getQuantityString</code>. Interview follow-ups: why shouldn't you use the <code>zero</code> quantity for "No calculations yet" in English? Lint already warns about this one (<code>PluralsCandidate</code>). Where else in the app is a count glued to a word?</details>
+
+- [ ] **79. In Spanish, saving a constant with a name that's taken crashes the app**
+  - Steps: switch the app to Spanish. Long-press `MR`, save `tax` = `0.16`, then save `tax` = `1` again.
+  - Expected: a toast like `Ya existe una constante llamada tax`, the same as the `tax already exists` toast in English.
+  - Actual: the app crashes with `java.util.IllegalFormatConversionException: d != java.lang.String`. English works fine. (This also turns the message in #46 into a crash in Spanish.)
+  <details><summary>Hint</summary>Put the English and Spanish <code>constant_exists</code> strings side by side. What does <code>%1$d</code> expect, and what is passed to <code>getString</code>? A translation is code too: a mistake there crashes only for users in that language, so it's easy to ship. <code>./gradlew lintDebug</code> reports it (<code>StringFormatMatches</code>), but <code>assembleDebug</code> doesn't run lint. Interview angle: how do you stop broken translations from shipping? Think about lint in CI, pseudo-locales, and a test that formats every string in every language.</details>
+
+- [ ] **80. In Arabic, the keypad is mirrored and `8 ÷ 4` shows as `4÷8`**
+  - Steps: switch the app to Arabic (`--locales ar`). The keys move, so find them by their labels. Press `8`, `÷`, `4`.
+  - Expected: the keypad keeps the usual calculator layout (`7 8 9 ÷` from left to right), and the display shows `8÷4`.
+  - Actual: the whole keypad is mirrored (`÷ 9 8 7`, `=` on the left, `M+` shows as `+M`), and the display shows `4÷8`. Pressing `=` gives `2`, so the screen doesn't match the answer.
+  <details><summary>Hint</summary>Look at the manifest: <code>android:supportsRtl="true"</code> turns on mirroring for every <code>Row</code>. Mirroring is right for most UI, but a keypad and a math expression shouldn't flip. For the display, think about the Unicode bidi algorithm: digits have a weak direction and <code>×</code>/<code>÷</code> are neutral, so the text takes the layout's RTL direction. Look at <code>LocalLayoutDirection</code>, and at <code>TextStyle(textDirection = …)</code> or <code>BidiFormatter</code>. Interview angle: what should and shouldn't mirror in an RTL layout (icons, progress, media controls, numbers)? What's the difference between <code>start</code>/<code>end</code> and <code>left</code>/<code>right</code>?</details>
+
+- [ ] **81. Keypad labels ignore the system font size**
+  - Steps: open the app and look at the keypad. Then run `adb shell settings put system font_scale 2.0`, reopen the app and compare. Reset it with `font_scale 1.0`.
+  - Expected: the key labels get bigger, like the top bar and the display do.
+  - Actual: the key labels stay exactly the same size. In `uiautomator dump`, the `7` is 39 px wide at both sizes. Before this feature it grew to 55 px.
+  <details><summary>Hint</summary>Look at <code>keyTextSize</code> in <code>Accessibility.kt</code>. Turning a <code>dp</code> value into <code>sp</code> with <code>LocalDensity</code> cancels out the user's font scale. That's why <code>sp</code> exists. Users with low vision rely on this setting, and blocking it is an accessibility failure. The real problem the comment talks about is a layout that can't grow: fixed <code>dp</code> heights. Look at <code>heightIn(min = …)</code> and <code>weight</code> instead. Interview follow-ups: what's non-linear font scaling (Android 14+), and how would you test a screen at 200% font size with <code>@Preview(fontScale = 2f)</code>?</details>
+
+- [ ] **82. TalkBack reads "Calculator display" instead of the number**
+  - Steps: type `12+`. Run `adb shell uiautomator dump /sdcard/u.xml && adb shell cat /sdcard/u.xml` and find the display node. With TalkBack on, tap the display or type a few digits.
+  - Expected: TalkBack reads what's on the display (`12+`), and announces the new value when it changes.
+  - Actual: the node has `text="12+"` and `content-desc="Calculator display"`. TalkBack reads the description instead of the text, so it says "Calculator display" and never the number. The label is in English even when the app is in Spanish.
+  <details><summary>Hint</summary>Look at <code>displaySemantics()</code> in <code>Accessibility.kt</code>. A <code>contentDescription</code> replaces the text for screen readers. It doesn't add to it. And the <code>liveRegion</code> can only ever announce that same label. Remove the description and let the text speak, or build a description that includes the value. Also think about whether every key press should be announced, or only results. Interview angle: <code>contentDescription</code> vs <code>stateDescription</code> vs <code>Modifier.semantics(mergeDescendants = true)</code> vs <code>clearAndSetSemantics</code>. How would a Compose UI test catch this (<code>assertContentDescriptionEquals</code>, <code>onNodeWithContentDescription</code>)?</details>
+
+**Bad practices in this area**
+
+- [ ] The translation is half done: in Spanish almost the whole UI is still English (top bar, keypad, dialogs, toasts), so users see mixed languages.
+- [ ] Accessibility text is hard-coded in Kotlin (`"Calculator display"`) instead of in `strings.xml`, so it can't be translated.
+- [ ] `locales_config.xml` is written by hand and can drift from the `values-*` folders. AGP can generate it (`generateLocaleConfig`).
+- [ ] No pseudo-locales (`en-XA` for long text, `ar-XB` for RTL) to catch these problems before real translations arrive.
+- [ ] The top bar can't cope with large text. At font scale 2.0 the title wraps one letter per line ("Cal / cul / ato / r").
+- [ ] `Color.Gray` text on white (History count, preview, "No calculations yet") is below the 4.5:1 contrast ratio WCAG asks for small text.
+
+**Stretch goals**
+
+- [ ] Add `@Preview`s for the calculator with `locale = "es"`, `locale = "ar"` and `fontScale = 2f`, or screenshot tests for the same.
+- [ ] Write a JVM or instrumented test that formats every string in every language with sample arguments, so #79 can't come back.
+- [ ] Turn on accessibility checks in UI tests (`enableAccessibilityChecks()` in Espresso, or the Compose equivalent) and fix what they find.
 
 ---
 

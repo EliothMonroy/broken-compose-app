@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- started moving strings here for the Spanish translation, more to come -->
+    <string name="history_count">%d calculations</string>
+    <string name="constant_exists">%1$s already exists</string>
+</resources>

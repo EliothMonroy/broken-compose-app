@@ -4,7 +4,7 @@
 
 **Broken Calc** is a Jetpack Compose calculator built for **Android interview practice**. It is *intentionally* buggy and *intentionally* written with bad Android/Kotlin/Compose practices. The user fixes these problems themselves to practise debugging, refactoring and explaining their reasoning.
 
-`todo.md` is the source of truth for the planted bugs (numbered 1–87), the bad-practice checklist, and stretch goals.
+`todo.md` is the source of truth for the planted bugs (numbered 1–82), the bad-practice checklist, and stretch goals.
 
 ## Rules for AI agents
 

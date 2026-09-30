@@ -93,6 +93,7 @@ fun CalculatorScreen() {
                 textAlign = TextAlign.End,
                 modifier = Modifier
                     .fillMaxWidth()
+                    .displaySemantics()
                     .pointerInput(Unit) {
                         detectTapGestures(onLongPress = { vm.copyResult() })
                     }
@@ -166,6 +167,6 @@ fun CalcButton(label: String, vm: CalculatorViewModel, modifier: Modifier, heigh
             },
         contentAlignment = Alignment.Center
     ) {
-        Text(text = label, fontSize = if (isMemory) 18.sp else 26.sp, color = fg)
+        Text(text = label, fontSize = keyTextSize(isMemory), color = fg)
     }
 }
