@@ -729,7 +729,53 @@ Useful commands (all need API 33+ for the per-app language):
 
 ## Flow operators
 
-<!-- placeholder: bugs #88–#92 (flow) -->
+The History list now has a **search field**, filter chips (**All**, **No errors**, **≥ 100**, **< 0**) and a summary line ("N matches · sum S"). While a query or a chip other than **All** is active, the normal list is hidden and the search results show in its place. The code is in `HistorySearch.kt`: `HistorySearchViewModel` builds the results with one Flow pipeline (`combine`, `debounce`, `map`, `flatMapMerge`, `catch`, `stateIn`). The search pretends to be slow: short queries take longer, "like a real database". Run `adb logcat -s HistorySearch` to see every search that starts. These bugs cover how Flow operators behave: when `combine` emits, which operator cancels old work, what `catch` does to the rest of the flow, `stateIn` sharing, and duplicate emissions.
+
+> ⚠️ Because of #88, the search does nothing until you tap a chip. For #89–#92, tap **All** once before you start typing. Avoid results of 1,000 or more while testing, because #36 crashes History.
+
+- [ ] **88. The search does nothing until you tap a chip**
+  - Steps: do a few calculations, for example `56+1=` and `150+6=`. Open History, tap the search field and type `56`. Wait a few seconds. Then tap the **All** chip, which already looks selected.
+  - Expected: after a short pause the results for `56` show up, without touching the chips.
+  - Actual: the summary says "Searching…" forever and logcat shows no search at all. As soon as you tap **All**, the results appear. Leaving History and coming back resets it.
+  <details><summary>Hint</summary>When does <code>combine</code> emit its first value? Look at each of its inputs and ask which one has a value before the user does anything. A <code>MutableSharedFlow</code> without an initial value is quiet until someone emits into it, and the "selected" look of the chip comes from a different piece of state. Interview angle: <code>StateFlow</code> vs <code>SharedFlow</code> (state vs events), <code>replay</code>, and <code>onStart { emit(…) }</code>. Is a chip selection really an event?</details>
+
+- [ ] **89. Results for an older query replace the results for what you typed**
+  - Steps: with the calculations above plus `5+5=`, open History, tap **All**, then tap the search field. Type `1`, wait about half a second, then type `5`, so the field says `15`. Wait 3 seconds.
+  - Expected: `1 match · sum 156`, only `150+6 = 156`.
+  - Actual: you may see `1 match` for a split second, then it switches to `3 matches · sum 223`. Those are the results for `1`, and they stay, even though the field says `15`. Logcat shows both searches started.
+  <details><summary>Hint</summary>The search for `1` is slower than the search for `15`, so it finishes last. Which operator turns each query into a search? <code>flatMapMerge</code> runs them all at the same time and passes on every result in the order they finish. Compare it with <code>flatMapConcat</code> and <code>flatMapLatest</code>, and explain which one cancels the old search. Does <code>debounce</code> fix this on its own? What if the user just types slowly?</details>
+
+- [ ] **90. After one search that includes `Infinity`, search says "No matches" forever**
+  - Steps: do `5÷0=` (result `Infinity`) and a few other calculations. Open History, tap **All**, then search for `5`. Now tap **No errors**, or change the query to `57`, or to anything else.
+  - Expected: `5` shows its matches (or at least a clear error), and **No errors** leaves out the `Infinity` row, so the search works again.
+  - Actual: `5` says "No matches". After that every query and every chip also says "No matches", and logcat shows no new searches. Logcat has one `W/HistorySearch: search error, showing no results` with a `NumberFormatException` from `BigDecimal`. Search only comes back after you leave History and return, or rotate the device.
+  <details><summary>Hint</summary>There are two problems. First, what does <code>BigDecimal("Infinity")</code> do? Second, and more important: where is <code>catch</code> in the chain? When an exception reaches <code>catch</code>, the upstream flow is already finished. <code>catch</code> can emit a last value, but it can't restart anything. Interview angle: exception transparency, why a <code>catch</code> at the end of the chain ends the whole flow, and the options: handle the error for each item inside the <code>map</code>, catch inside the inner flow of <code>flatMap…</code>, or <code>retry</code>/<code>retryWhen</code>. Why does leaving History "fix" it?</details>
+
+- [ ] **91. Rotating the device runs the whole search again**
+  - Steps: tap **All**, search for `15` and wait for `1 match`. Run `adb logcat -s HistorySearch`. Rotate the device.
+  - Expected: the same results stay on screen. The ViewModel survived the rotation, so there's nothing to redo.
+  - Actual: the summary goes back to "Searching…" for about a second, and logcat shows another `search #2 for '15'`. Every rotation starts a new search. (The results may also change, because of #23.)
+  <details><summary>Hint</summary>Read the <code>SharingStarted</code> argument of <code>stateIn</code>. During a rotation the old screen stops collecting before the new one starts. What does a stop timeout of <code>0</code> do in that gap? Why is <code>WhileSubscribed(5_000)</code> the usual choice, and when would you pick <code>Eagerly</code> or <code>Lazily</code> instead? Follow-up: what does the second parameter, <code>replayExpirationMillis</code>, change?</details>
+
+- [ ] **92. Typing a space re-runs the search**
+  - Steps: tap **All**, search for `15` and wait for the results. Run `adb logcat -s HistorySearch`. Type a space at the end of the query.
+  - Expected: nothing happens. `15 ` is trimmed to `15`, which was already searched.
+  - Actual: the summary flashes "Searching…" and logcat shows `search #N for '15'` again, with exactly the same query.
+  <details><summary>Hint</summary><code>StateFlow</code> never emits the same value twice in a row. What about the operators after it? <code>map { it.trim() }</code> turns two different strings into the same one, and neither <code>map</code> nor <code>combine</code> drops repeats. Which operator does, and where does it belong in the chain? Follow-up: does it matter whether it goes before or after <code>debounce</code>?</details>
+
+**Bad practices in this area**
+
+- [ ] State is stringly typed: `status` is `"idle"`, `"searching"` or `"done"`, and the chips are compared as strings. Use a sealed interface for the state and an enum for the chips.
+- [ ] `historySearchActive` is a global `mutableStateOf` that the ViewModel writes and `History.kt` reads, instead of state that the screen gets from its ViewModel.
+- [ ] The ViewModel keeps the query twice (`queryText` for the text field and a `MutableStateFlow` for the pipeline) and mixes Compose state with flows.
+- [ ] `collectAsState()` instead of `collectAsStateWithLifecycle()`, so collection keeps going while the app is in the background.
+- [ ] `HistoryManager.itemsFlow()` reads the list only once, when collection starts. The search never sees new or deleted entries until it's restarted.
+- [ ] The fake search latency (`delay`) and hard-coded strings are in the ViewModel. No tests for the pipeline.
+
+**Stretch goals**
+
+- [ ] Test the pipeline with `runTest` and a `TestDispatcher`: `advanceTimeBy` past the `debounce`, and check that only the last query's results come out. Try Turbine-style checks with `take(n).toList()` if you don't want to add a library.
+- [ ] Give `HistoryManager` a real `StateFlow<List<String>>` and build the search on it, so results update when the history changes. Keep an eye on #24 and #33 while you do it.
 
 ## Permissions, notifications and foreground services
 

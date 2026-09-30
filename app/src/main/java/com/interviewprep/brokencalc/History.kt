@@ -114,6 +114,7 @@ fun HistoryList(navController: NavController) {
         }
 
         HistoryStats()
+        HistorySearch()
 
         if (items.size == 0) {
             Text(
@@ -123,7 +124,7 @@ fun HistoryList(navController: NavController) {
             )
         }
 
-        Column(modifier = Modifier.verticalScroll(scrollState)) {
+        Column(modifier = Modifier.hiddenWhileSearching().verticalScroll(scrollState)) {
             for (item in items.reversed()) {
                 Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Text(
