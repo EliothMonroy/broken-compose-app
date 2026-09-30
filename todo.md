@@ -723,6 +723,22 @@ Useful commands (all need API 33+ for the per-app language):
 - [ ] Write a JVM or instrumented test that formats every string in every language with sample arguments, so #79 can't come back.
 - [ ] Turn on accessibility checks in UI tests (`enableAccessibilityChecks()` in Espresso, or the Compose equivalent) and fix what they find.
 
+## UI state and one-off events
+
+<!-- placeholder: bugs #83–#87 (ui-state) -->
+
+## Flow operators
+
+<!-- placeholder: bugs #88–#92 (flow) -->
+
+## Permissions, notifications and foreground services
+
+<!-- placeholder: bugs #93–#97 (permissions) -->
+
+## Adaptive UI
+
+<!-- placeholder: bugs #98–#102 (adaptive) -->
+
 ---
 
 ## Bad practices to refactor

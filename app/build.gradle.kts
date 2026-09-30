@@ -87,6 +87,11 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.9.2")
     implementation("androidx.lifecycle:lifecycle-viewmodel-savedstate:2.9.2")
 
+    // Adaptive UI
+    implementation("androidx.compose.material3:material3-window-size-class")
+    implementation("androidx.compose.material3.adaptive:adaptive:1.1.0")
+    implementation("androidx.window:window:1.4.0")
+
     // WorkManager
     implementation("androidx.work:work-runtime-ktx:2.10.3")
     implementation("androidx.hilt:hilt-work:1.2.0")
