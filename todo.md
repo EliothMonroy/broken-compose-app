@@ -393,7 +393,57 @@ The top level of the app still uses the `currentScreen` string (see #8). Inside 
 
 ## Testing
 
-<!-- placeholder: bugs #53–#57 (testing) -->
+The app now has a small test suite, but the tests have bugs of their own. Some fail for the wrong reason, some pass when they shouldn't, and one can't even start. These bugs are in the **test code and test setup**. The fix is usually a better test, sometimes plus a change that makes the app code testable.
+
+Run the JVM unit tests with `./gradlew testDebugUnitTest` (report: `app/build/reports/tests/testDebugUnitTest/index.html`). Run the device tests with an emulator or device connected: `./gradlew connectedDebugAndroidTest` (report: `app/build/reports/androidTests/connected/debug/index.html`). Add `--tests "*CalculatorTest*"` to run one unit test class, or `-Pandroid.testInstrumentationRunnerArguments.class=com.interviewprep.brokencalc.SessionTrackerTest` to run one device test class.
+
+> ⚠️ **Some failures are honest.** These tests are correct and fail because of app bugs, so they are *not* test bugs: `CalculatorTest.subtractionIsLeftToRight` and `divisionIsLeftToRight` fail until you fix #14, and `CalculatorTest.pointOnePlusPointTwo` fails until you fix #15. `SessionTrackerTest.sessionTrackerIsASingleton` fails until you fix #39, but you'll only get that far after fixing #57.
+
+- [ ] **53. `CalculatorFormatTest` crashes before it checks anything**
+  - Steps: `./gradlew testDebugUnitTest --tests "*CalculatorFormatTest*"`.
+  - Expected: `format(4.0)` returns `"4"` and `format(0.5)` returns `"0.5"`, so both tests pass.
+  - Actual: both tests fail with `kotlin.UninitializedPropertyAccessException: lateinit property prefs has not been initialized`. The fix should let `Calculator.format` run in a plain JVM test with no Activity, and let the test choose the number of decimal places.
+  <details><summary>Hint</summary>Follow the stack trace into <code>Calculator.format</code>. What does it read, and who sets that? A function that reaches into a static <code>lateinit</code> has a hidden input the test can't see or control. Make the input explicit, for example a parameter. Resist "fixing" the test by assigning <code>MainActivity.prefs</code> a fake: that global then leaks into every other test in the same JVM. Interview angle: "what makes code hard to unit test?"</details>
+
+- [ ] **54. `divideByZeroIsAnError` passes even though `5 ÷ 0` gives `Infinity`**
+  - Steps: `./gradlew testDebugUnitTest --tests "*CalculatorTest.divideByZeroIsAnError*"`. Then press `5`, `÷`, `0`, `=` in the app (#9).
+  - Expected: the test fails until #9 is fixed, with the message `5÷0 should not give a number`.
+  - Actual: the test passes, although the app is broken. The fix should make the test fail today and pass only once dividing by zero is really an error.
+  <details><summary>Hint</summary>What does <code>fail()</code> actually do to stop a test? And what is the <code>catch</code> block catching? A test that can't fail is worse than no test, because it gives you false confidence. Check that a test fails at least once before you trust it. Look at <code>assertThrows</code>, and think about which exact exception #9's fix should throw.</details>
+
+- [ ] **55. `previewShowsResultWhileTyping` fails even though the test "skips" the delay**
+  - Steps: `./gradlew testDebugUnitTest --tests "*CalculatorViewModelTest*"`.
+  - Expected: after `2`, `+`, `3` and `advanceUntilIdle()`, `vm.preview` is `"5"`.
+  - Actual: `org.junit.ComparisonFailure: expected:<[5]> but was:<[]>`. It still fails after you fix #53. The fix should make the test control the preview coroutine, so it passes right away with no real waiting and no `Thread.sleep`.
+  <details><summary>Hint</summary>The test sets <code>Dispatchers.setMain</code> and uses <code>runTest</code>, so it looks right. But which scope and dispatcher does <code>updatePreview()</code> actually launch on? Virtual time only controls coroutines that run on the test's scheduler. The ViewModel has to let the test in, for example with <code>viewModelScope</code> or an injected dispatcher. Interview angle: "how do you test code that uses <code>delay</code>?" A common follow-up is a reusable <code>MainDispatcherRule</code>.</details>
+
+- [ ] **56. `tenMinusFiveMinusTwoIsThree` passes even though the app shows `7`**
+  - Steps: `./gradlew connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.interviewprep.brokencalc.CalculatorScreenTest`. Then do `10 − 5 − 2 =` by hand (#14).
+  - Expected: the test fails until #14 is fixed.
+  - Actual: both UI tests pass, although the app is broken. The fix should check the number on the **display**, and should wait until the result has arrived.
+  <details><summary>Hint</summary>Which node does <code>onNodeWithText("3")</code> find? Look at the screen: how many things say "3"? Once the finder is fixed, try it again: what does the display show at the moment of the check? <code>waitForIdle()</code> only waits for Compose and Espresso. It knows nothing about a <code>GlobalScope</code> coroutine with a <code>delay</code>. Look at <code>Modifier.testTag</code>, <code>onNodeWithTag</code>, <code>waitUntil</code>, and idling resources.</details>
+
+- [ ] **57. The Hilt test can't start: "cannot use a @HiltAndroidApp application"**
+  - Steps: `./gradlew connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.interviewprep.brokencalc.SessionTrackerTest`.
+  - Expected: Hilt injects two `SessionTracker`s and the test runs its assertion.
+  - Actual: `IllegalStateException: Hilt test, com.interviewprep.brokencalc.SessionTrackerTest, cannot use a @HiltAndroidApp application but found com.interviewprep.brokencalc.CalcApp.` The fix should let the test's assertion run. It will then fail honestly because of #39.
+  <details><summary>Hint</summary>Which <code>Application</code> class does the test runner create? Read <code>HiltTestRunner</code> and the <code>testInstrumentationRunner</code> line in <code>app/build.gradle.kts</code>. Hilt tests need a test application so every test gets a fresh component that it can replace parts of. Heads up: once every test runs on that application, <code>CalculatorScreenTest</code> starts failing with <code>The component was not created</code>. Why? Buttons call <code>appEntryPoint()</code>. What does that tell you about service locators?</details>
+
+**Bad practices in this area**
+
+- [ ] Tests reach into global singletons (`Calculator`, `HistoryManager`, `Memory`) and never reset them, so the order they run in could change the result.
+- [ ] No `MainDispatcherRule`: every coroutine test class sets and resets `Dispatchers.Main` by hand.
+- [ ] UI tests find nodes by visible text instead of `testTag` or content description, so they break when copy changes and can match the wrong node.
+- [ ] `assertEquals(Double, Double, 0.0)`: an exact comparison of floating-point numbers.
+- [ ] Only happy paths are tested. There are no tests for edge cases such as empty input, `⌫` on an empty display, or `=` pressed twice.
+- [ ] No fakes for storage: nothing in the app can run in a test without a real `SharedPreferences`.
+
+**Stretch goals**
+
+- [ ] Write a `MainDispatcherRule` and use it in every ViewModel test.
+- [ ] Parameterise the `Calculator` tests (JUnit `Parameterized`) so each math bug is one row in a table.
+- [ ] Make every UI test a `@HiltAndroidTest` and replace `SettingsStore` with `@BindValue` or `@TestInstallIn`.
+- [ ] Add screenshot or golden tests for the keypad in light and dark mode.
 
 ## Networking (Retrofit / OkHttp)
 
