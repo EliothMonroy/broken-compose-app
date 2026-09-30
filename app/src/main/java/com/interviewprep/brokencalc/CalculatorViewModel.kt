@@ -8,14 +8,17 @@ import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlin.random.Random
 
 @OptIn(DelicateCoroutinesApi::class)
 class CalculatorViewModel : ViewModel() {
 
     var display by mutableStateOf("")
+    var preview by mutableStateOf("")
     var justEvaluated = false
 
     fun onButton(label: String) {
+        val before = display
         when (label) {
             "0", "1", "2", "3", "4", "5", "6", "7", "8", "9" -> {
                 if (justEvaluated) {
@@ -51,7 +54,10 @@ class CalculatorViewModel : ViewModel() {
                 }
             }
             "=" -> calculate()
-            "MC" -> Memory.value = 0.0
+            "MC" -> {
+                Memory.value = 0.0
+                Memory.save()
+            }
             "MR" -> {
                 val m = Memory.value.toString().removeSuffix(".0")
                 if (justEvaluated || display == "") {
@@ -61,8 +67,30 @@ class CalculatorViewModel : ViewModel() {
                     display = display + m
                 }
             }
-            "M+" -> Memory.value = Memory.value + (display.toDoubleOrNull() ?: 0.0)
-            "M−" -> Memory.value = Memory.value + (display.toDoubleOrNull() ?: 0.0)
+            "M+" -> {
+                Memory.value = Memory.value + (display.toDoubleOrNull() ?: 0.0)
+                Memory.save()
+            }
+            "M−" -> {
+                Memory.value = Memory.value + (display.toDoubleOrNull() ?: 0.0)
+                Memory.save()
+            }
+        }
+        if (display != before) {
+            updatePreview()
+        }
+    }
+
+    // shows the result while you type
+    fun updatePreview() {
+        val expression = display
+        GlobalScope.launch {
+            delay(Random.nextLong(50, 1000)) // evaluating is expensive, like a real math engine
+            try {
+                preview = Calculator.format(Calculator.evaluate(expression))
+            } catch (e: Exception) {
+                preview = ""
+            }
         }
     }
 

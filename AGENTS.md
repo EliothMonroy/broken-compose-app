@@ -4,7 +4,7 @@
 
 **Broken Calc** is a Jetpack Compose calculator built for **Android interview practice**. It is *intentionally* buggy and *intentionally* written with bad Android/Kotlin/Compose practices. The user fixes these problems themselves to practise debugging, refactoring and explaining their reasoning.
 
-`todo.md` is the source of truth for the planted bugs (numbered 1–28), the bad-practice checklist, and stretch goals.
+`todo.md` is the source of truth for the planted bugs (numbered 1–37), the bad-practice checklist, and stretch goals.
 
 ## Rules for AI agents
 
@@ -43,13 +43,13 @@ When tests are added: `./gradlew testDebugUnitTest` (JVM) and `./gradlew connect
 ```
 app/src/main/java/com/interviewprep/brokencalc/
 ├── MainActivity.kt         # entry point; static Activity/prefs refs; loads history
-├── Globals.kt              # global mutable state: screen, selected history item, memory
+├── Globals.kt              # global mutable state: screen, selected history item, memory, appScope
 ├── App.kt                  # string-based "navigation" + top bar
 ├── Theme.kt                # CalcTheme(dark)
-├── CalculatorScreen.kt     # display + keypad composables
-├── CalculatorViewModel.kt  # button handling, GlobalScope evaluation
+├── CalculatorScreen.kt     # display, live preview, idle auto-clear, keypad
+├── CalculatorViewModel.kt  # button handling, GlobalScope evaluation + preview
 ├── Calculator.kt           # tokenizer, recursive-descent parser, result formatter
-├── History.kt              # HistoryManager (prefs) + HistoryScreen
+├── History.kt              # HistoryManager (prefs, callbackFlow) + HistoryScreen + async stats
 └── SettingsScreen.kt       # dark mode + decimal places
 ```
 

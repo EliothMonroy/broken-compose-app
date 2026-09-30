@@ -178,7 +178,7 @@ Some bugs share a root cause, and fixing one can uncover another. That's intenti
   <details><summary>Hint</summary><code>remember { CalculatorViewModel() }</code> is not how you get a ViewModel. Look at <code>viewModel()</code> from <code>lifecycle-viewmodel-compose</code>, and at <code>SavedStateHandle</code> for process death.</details>
 
 - [ ] **27. The memory indicator `M` doesn't show up after `M+`**
-  - Steps: `5`, `M+`.
+  - Steps: press `5`, wait a second, then press `M+`.
   - Expected: a small `M` appears above the display right away.
   - Actual: it only appears after you press another key. `MC` has the same problem in reverse.
   <details><summary>Hint</summary><code>Memory.value</code> is a plain <code>var</code>, so Compose has no way to know it changed.</details>
@@ -189,6 +189,66 @@ Some bugs share a root cause, and fixing one can uncover another. That's intenti
   - Actual: the `9` shows for a moment, then the result `4` replaces it. Tapping `=` twice quickly can add duplicate history entries.
   <details><summary>Hint</summary><code>GlobalScope</code> plus an artificial <code>delay</code>, results written back without checking whether the input has changed, and a shared mutable parser (<code>Calculator.tokens</code> and <code>pos</code>) with no synchronisation. Use <code>viewModelScope</code>. Does this even need to be async?</details>
 
+## Coroutines
+
+These cover what interviewers usually ask about: scopes, cancellation, dispatchers, `async`/`await`, exception propagation, `SupervisorJob`, and Flow.
+
+> ⚠️ **#31 slows the whole app down** every time you leave the calculator screen, and its log spam hides other log output. If it gets in your way, fix it first.
+
+- [ ] **29. The live preview sometimes shows a stale result**
+  - Steps: quickly type `1+2+3+4+5` and watch the gray preview under the display. Try it a few times.
+  - Expected: the preview always ends at `= 15`.
+  - Actual: it often ends at an older value, like `= 10`, or disappears because the last result to arrive was for `1+2+3+4+`.
+  <details><summary>Hint</summary><code>updatePreview()</code> starts a new <code>GlobalScope</code> coroutine on every key press, with a random delay, and never cancels the previous one. Whichever finishes last wins. Keep a <code>Job</code> and cancel it, or model the input as a <code>Flow</code> and use <code>debounce</code> plus <code>mapLatest</code>/<code>collectLatest</code>. Also think about what <code>catch (e: Exception)</code> does once cancellation starts happening here.</details>
+
+- [ ] **30. The display is wiped while you're typing**
+  - Steps: type a digit every few seconds for about 30 seconds.
+  - Expected: the display only clears after 30 seconds with **no** input.
+  - Actual: it clears 30 seconds after the screen opened, even in the middle of typing.
+  <details><summary>Hint</summary><code>LaunchedEffect(Unit)</code> never restarts. What should its key be? Once the key is right, you probably don't need the counter at all.</details>
+
+- [ ] **31. Leaving the calculator pegs the CPU, and after a few trips `=` stops working**
+  - Steps: open History or Settings, or rotate. Check the CPU in Android Studio's profiler, or run `adb shell top`, and watch `adb logcat -s IdleTimer`. Go back and forth about four times, then try `3`, `+`, `3`, `=`.
+  - Expected: nothing runs once the calculator is off screen.
+  - Actual: `IdleTimer: tick failed: The coroutine scope left the composition` is logged hundreds of thousands of times per second, CPU goes over 100%, and eventually `=` and the preview never produce anything.
+  <details><summary>Hint</summary><code>catch (e: Exception)</code> also catches <code>CancellationException</code>. The loop never ends, and once the job is cancelled <code>delay()</code> throws straight away, so it spins on a <code>Dispatchers.Default</code> thread forever. Each trip adds another spinning thread until the default pool (one thread per CPU core) is full, and then <code>GlobalScope.launch</code> work for <code>=</code> never gets a thread. Rethrow <code>CancellationException</code>, or catch only what you mean to, and use <code>while (isActive)</code>. Why is <code>withContext(Dispatchers.Default)</code> pointless for a timer?</details>
+
+- [ ] **32. Clear history freezes the UI, and the "Saving…" indicator never shows**
+  - Steps: History → Clear history. Watch the ripple, or run `adb logcat | grep Choreographer`.
+  - Expected: the UI stays responsive and "Saving…" shows while the write happens.
+  - Actual: the app freezes for about 0.8 s (`Skipped 47 frames!`), and "Saving…" never appears.
+  <details><summary>Hint</summary><code>runBlocking</code> on the main thread blocks it. <code>isSaving</code> goes <code>true</code> and back to <code>false</code> before a frame can be drawn. Use a scope tied to a lifecycle, and move the disk write to <code>Dispatchers.IO</code> with <code>withContext</code>. Why was <code>delay(800)</code> never the right fix for "nothing gets lost"?</details>
+
+- [ ] **33. The History badge leaks a listener every time the top bar recomposes** *(easiest to see once #31 is fixed)*
+  - Steps: run `adb logcat -s HistoryManager`. Do a calculation, switch between Calc and Settings a few times, then do another calculation.
+  - Expected: `Notifying 1 listeners` every time.
+  - Actual: the number keeps growing (1 → 7 → 13 …).
+  <details><summary>Hint</summary>Two problems. <code>awaitClose { }</code> doesn't unregister the listener. And <code>HistoryManager.changes()</code> creates a <b>new</b> <code>Flow</code> on every recomposition, so <code>collectAsState</code> restarts the collection each time. Remove the listener in <code>awaitClose</code>, and expose one shared flow (for example <code>stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), …)</code>), or <code>remember</code> it. Bonus: <code>listeners</code> is an <code>ArrayList</code> changed on the main thread and iterated on a background thread.</details>
+
+- [ ] **34. History stats take about 1.5 s to load when they should take about 0.5 s**
+  - Steps: do a calculation, then open History and time the "Calculating stats…" text.
+  - Expected: roughly the time of one `slowStat` call (about 500 ms), because the three stats are independent.
+  - Actual: about 1.5 s. They run one after another.
+  <details><summary>Hint</summary><code>async { … }.await()</code> on the same line is just sequential code with extra steps. Start all three, then <code>await</code> them, or use <code>awaitAll</code>. Also, is <code>Dispatchers.IO</code> the right dispatcher for CPU work?</details>
+
+- [ ] **35. History stats never settle: "Calculating stats…" keeps coming back**
+  - Steps: open History and watch the stats line for a few seconds.
+  - Expected: it's computed once, then only again when the history changes.
+  - Actual: it cycles between "Calculating stats…" and the result forever, recomputing all the time.
+  <details><summary>Hint</summary><code>scope.launch</code> is called directly in the <code>HistoryStats</code> composable body. Every write to <code>stats</code> causes a recomposition, which starts another coroutine. Side effects belong in <code>LaunchedEffect(key)</code> or in event callbacks, and <code>rememberCoroutineScope</code> is for events such as clicks.</details>
+
+- [ ] **36. Opening History crashes even though the stats code has a `try/catch`** *(reproduce this before fixing #21)*
+  - Steps: `9`, `9`, `9`, `+`, `1`, `=` (result `1,000`), then open History.
+  - Expected: the stats line shows "Stats unavailable", which is what the `catch` is for, and the app keeps working.
+  - Actual: the app crashes with `NumberFormatException: For input string: "1,000"`.
+  <details><summary>Hint</summary>An exception inside a child <code>async</code> cancels its <b>parent</b> straight away. That happens whether or not someone calls <code>await()</code>, so a <code>try/catch</code> around <code>await()</code> can't stop it. Handle the error inside the <code>async</code> block, or wrap the children in <code>supervisorScope { }</code>, and know why each works. This is a very common interview question: "what's the difference between exceptions in <code>launch</code> and in <code>async</code>?"</details>
+
+- [ ] **37. After one failed background save, nothing is ever saved again**
+  - Steps: `5`, `÷`, `0`, `=` (result `Infinity`), then `M+`. Then do `2`, `+`, `2`, `=`. Force-stop and reopen the app.
+  - Expected: the Infinity memory write is rejected, but `2+2 = 4` is still saved to history.
+  - Actual: `2+2 = 4` is gone after the restart, and so is every later calculation. Logcat shows a single `AppScope: Background work failed … Can't save Infinity to memory`.
+  <details><summary>Hint</summary><code>appScope</code> is built on a plain <code>Job()</code>. When one child fails, the whole scope is cancelled, and every later <code>appScope.launch</code> silently does nothing. The <code>CoroutineExceptionHandler</code> only logs the failure, which hides the problem. <code>SupervisorJob()</code> keeps the siblings alive. Also ask: should a <code>require</code> run inside a fire-and-forget coroutine at all, or should the input be checked before launching?</details>
+
 ---
 
 ## Bad practices to refactor
@@ -198,6 +258,10 @@ These aren't user-visible bugs, but an interviewer will notice them. Being able 
 - [ ] Static `MainActivity.instance` (Activity leak, hidden with `@SuppressLint("StaticFieldLeak")`).
 - [ ] Global mutable state (`currentScreen`, `selectedHistoryItem`, `Memory`, `HistoryManager`) instead of state owned by a ViewModel and passed down.
 - [ ] `GlobalScope` and `@OptIn(DelicateCoroutinesApi::class)` used to silence the warning.
+- [ ] A hand-rolled global `appScope` that's never cancelled, instead of `viewModelScope` or a lifecycle-aware or injected application scope.
+- [ ] Dispatchers are hard-coded everywhere (`Dispatchers.IO` for CPU work, `Default` for a timer), so the code can't be tested with a `TestDispatcher`.
+- [ ] Fake `delay`s and `Random` latency used to make things "feel" async.
+- [ ] `catch (e: Exception)` inside coroutines, which swallows cancellation.
 - [ ] `SharedPreferences.commit()` on the main thread, and on **every recomposition** in `SettingsScreen`.
 - [ ] Side effects (prefs writes, state writes) directly in composable bodies.
 - [ ] Navigation with magic strings and an `if/else` chain. No type safety, no back stack.
@@ -222,6 +286,7 @@ These aren't user-visible bugs, but an interviewer will notice them. Being able 
 
 - [ ] Add unit tests for `Calculator` (tokenizer, parser, formatter) covering every math bug above.
 - [ ] Add a Compose UI test for the history → calculator flow (#25) and the input-preservation bug (#26).
+- [ ] Inject dispatchers into the ViewModel, then test the preview (#29), idle clear (#30) and stats (#34) with `runTest`, `StandardTestDispatcher` and virtual time (`advanceTimeBy`), so the tests don't actually wait.
 - [ ] Move to a single `CalculatorUiState` data class exposed as `StateFlow` and collected with `collectAsStateWithLifecycle()`.
 - [ ] Replace SharedPreferences with DataStore, and history with Room.
 - [ ] Add Hilt, or manual DI, so nothing reaches for a static Activity.
