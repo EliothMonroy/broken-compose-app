@@ -3,6 +3,7 @@ package com.interviewprep.brokencalc
 import android.util.Log
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,6 +21,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -82,7 +86,11 @@ fun CalculatorScreen() {
                 softWrap = false,
                 overflow = TextOverflow.Clip,
                 textAlign = TextAlign.End,
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .pointerInput(Unit) {
+                        detectTapGestures(onLongPress = { vm.copyResult() })
+                    }
             )
             if (vm.preview != "" && vm.preview != vm.display) {
                 Text("= " + vm.preview, color = Color.Gray, fontSize = 24.sp)
@@ -133,13 +141,20 @@ fun CalcButton(label: String, vm: CalculatorViewModel, modifier: Modifier, heigh
         fg = Color.White
     }
 
+    val haptics = LocalHapticFeedback.current
+
     Box(
         modifier = modifier
             .padding(4.dp)
             .height(height.dp)
             .clip(RoundedCornerShape(16.dp))
             .background(bg)
-            .clickable { vm.onButton(label) },
+            .clickable {
+                if (appEntryPoint().settingsStore().hapticsEnabled) {
+                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                }
+                vm.onButton(label)
+            },
         contentAlignment = Alignment.Center
     ) {
         Text(text = label, fontSize = if (isMemory) 18.sp else 26.sp, color = fg)

@@ -4,7 +4,7 @@
 
 **Broken Calc** is a Jetpack Compose calculator built for **Android interview practice**. It is *intentionally* buggy and *intentionally* written with bad Android/Kotlin/Compose practices. The user fixes these problems themselves to practise debugging, refactoring and explaining their reasoning.
 
-`todo.md` is the source of truth for the planted bugs (numbered 1–37), the bad-practice checklist, and stretch goals.
+`todo.md` is the source of truth for the planted bugs (numbered 1–42), the bad-practice checklist, and stretch goals.
 
 ## Rules for AI agents
 
@@ -25,7 +25,8 @@
 - AGP 8.13, Gradle 8.14 (wrapper included), JDK 17+
 - `minSdk 24`, `targetSdk`/`compileSdk 36`
 - Persistence: `SharedPreferences` (`calc_prefs`)
-- No DI, no navigation library, no tests (all on purpose)
+- DI: Hilt 2.57 with KSP, only partly adopted on purpose (see bugs #38–#42)
+- No navigation library, no tests (on purpose)
 
 ## Build and run
 
@@ -42,7 +43,10 @@ When tests are added: `./gradlew testDebugUnitTest` (JVM) and `./gradlew connect
 
 ```
 app/src/main/java/com/interviewprep/brokencalc/
+├── CalcApp.kt              # @HiltAndroidApp Application
 ├── MainActivity.kt         # entry point; static Activity/prefs refs; loads history
+├── Di.kt                   # Hilt modules, qualifiers, AppEntryPoint service locator
+├── Services.kt             # SessionTracker, SettingsStore (+ impls), ClipboardHelper
 ├── Globals.kt              # global mutable state: screen, selected history item, memory, appScope
 ├── App.kt                  # string-based "navigation" + top bar
 ├── Theme.kt                # CalcTheme(dark)
@@ -50,7 +54,8 @@ app/src/main/java/com/interviewprep/brokencalc/
 ├── CalculatorViewModel.kt  # button handling, GlobalScope evaluation + preview
 ├── Calculator.kt           # tokenizer, recursive-descent parser, result formatter
 ├── History.kt              # HistoryManager (prefs, callbackFlow) + HistoryScreen + async stats
-└── SettingsScreen.kt       # dark mode + decimal places
+├── SettingsScreen.kt       # dark mode, haptics, decimal places, session stats
+└── SettingsViewModel.kt    # @HiltViewModel for Settings
 ```
 
 ## Conventions for fixes
