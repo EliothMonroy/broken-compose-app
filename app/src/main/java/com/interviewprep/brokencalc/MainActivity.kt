@@ -23,6 +23,7 @@ class MainActivity : ComponentActivity() {
 
         HistoryManager.load()
         Memory.load()
+        startUsageTimer()
 
         val darkMode = prefs.getBoolean("dark_mode", false)
 
