@@ -1,5 +1,6 @@
 package com.interviewprep.brokencalc
 
+import android.util.Log
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -13,6 +14,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -22,6 +24,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 
 @Composable
 fun CalculatorScreen() {
@@ -31,6 +36,27 @@ fun CalculatorScreen() {
     if (selectedHistoryItem != null) {
         vm.display = selectedHistoryItem!!
         vm.justEvaluated = true
+    }
+
+    // auto-clear the display after 30 seconds of inactivity
+    LaunchedEffect(Unit) {
+        withContext(Dispatchers.Default) { // keep the timer off the UI thread
+            var idleSeconds = 0
+            while (true) {
+                try {
+                    delay(1000)
+                    idleSeconds++
+                    if (idleSeconds >= 30) {
+                        vm.display = ""
+                        vm.preview = ""
+                        idleSeconds = 0
+                    }
+                } catch (e: Exception) {
+                    // the timer must never die
+                    Log.w("IdleTimer", "tick failed: " + e.message)
+                }
+            }
+        }
     }
 
     var displayText = vm.display
@@ -58,6 +84,9 @@ fun CalculatorScreen() {
                 textAlign = TextAlign.End,
                 modifier = Modifier.fillMaxWidth()
             )
+            if (vm.preview != "" && vm.preview != vm.display) {
+                Text("= " + vm.preview, color = Color.Gray, fontSize = 24.sp)
+            }
         }
 
         CalcRow(listOf("MC", "MR", "M+", "M−"), vm, 56)

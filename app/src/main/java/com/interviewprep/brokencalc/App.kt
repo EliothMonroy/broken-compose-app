@@ -9,6 +9,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -57,9 +59,10 @@ fun TopBar() {
                 Text("Calc", color = Color.White)
             }
         }
+        val historyCount by HistoryManager.changes().collectAsState(initial = HistoryManager.items.size)
         if (currentScreen != "history") {
             TextButton(onClick = { currentScreen = "history" }) {
-                Text("History", color = Color.White)
+                Text("History (" + historyCount + ")", color = Color.White)
             }
         }
         if (currentScreen != "settings") {

@@ -22,6 +22,7 @@ class MainActivity : ComponentActivity() {
         prefs = getSharedPreferences("calc_prefs", Context.MODE_PRIVATE)
 
         HistoryManager.load()
+        Memory.load()
 
         val darkMode = prefs.getBoolean("dark_mode", false)
 
