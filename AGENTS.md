@@ -37,25 +37,59 @@ adb shell am start -n com.interviewprep.brokencalc/.MainActivity
 adb logcat -s AndroidRuntime     # watch for crashes
 ```
 
-When tests are added: `./gradlew testDebugUnitTest` (JVM) and `./gradlew connectedDebugAndroidTest` (device).
+```bash
+./gradlew testDebugUnitTest          # JVM unit tests (app/src/test)
+./gradlew connectedDebugAndroidTest  # device/Compose/Hilt tests (app/src/androidTest); uninstalls the app afterwards
+```
+
+The test suite is **red on purpose**: some tests fail honestly because of app bugs, and others are themselves buggy (see the Testing section of `todo.md`). Don't "fix" them unless asked.
+
+Some bugs need device tricks: shaking (`adb emu sensor set acceleration …`), process death (`adb shell am kill …`), per-app locales (`adb shell cmd locale set-app-locales …`), fake charging (`adb shell dumpsys battery …`) and forcing WorkManager jobs (`adb shell cmd jobscheduler run -f …`). The relevant `todo.md` sections give the exact commands. Always restore device settings afterwards.
 
 ## Layout
 
+Everything is in one flat package on purpose. The groups below are only for reading; there are no sub-packages.
+
 ```
 app/src/main/java/com/interviewprep/brokencalc/
-├── CalcApp.kt              # @HiltAndroidApp Application
-├── MainActivity.kt         # entry point; static Activity/prefs refs; loads history
-├── Di.kt                   # Hilt modules, qualifiers, AppEntryPoint service locator
-├── Services.kt             # SessionTracker, SettingsStore (+ impls), ClipboardHelper
-├── Globals.kt              # global mutable state: screen, selected history item, memory, appScope
-├── App.kt                  # string-based "navigation" + top bar
+│  App shell
+├── CalcApp.kt              # @HiltAndroidApp Application; WorkManager Configuration.Provider, daily backup
+├── MainActivity.kt         # entry point; static Activity/prefs refs; loads history/memory; usage timer, startup tasks
+├── App.kt                  # string-based "navigation", top bar ($ converter button, History badge)
 ├── Theme.kt                # CalcTheme(dark)
+├── Globals.kt              # global mutable state: screen, selected history item, memory, appScope
+│  Calculator
 ├── CalculatorScreen.kt     # display, live preview, idle auto-clear, keypad
-├── CalculatorViewModel.kt  # button handling, GlobalScope evaluation + preview
+├── CalculatorViewModel.kt  # button handling, GlobalScope evaluation + preview, copy
 ├── Calculator.kt           # tokenizer, recursive-descent parser, result formatter
-├── History.kt              # HistoryManager (prefs, callbackFlow) + HistoryScreen + async stats
-├── SettingsScreen.kt       # dark mode, haptics, decimal places, session stats
-└── SettingsViewModel.kt    # @HiltViewModel for Settings
+├── ConstantsDb.kt          # Room: Constant entity, DAO, database, Hilt module (bugs #43–#47)
+├── ConstantsDialog.kt      # Constants dialog (long-press MR)
+├── ConverterDialog.kt      # currency converter dialog (bugs #58–#62)
+├── RatesApi.kt             # Retrofit API, @Serializable models, rate cache
+├── NetworkModule.kt        # Hilt: OkHttp, Retrofit, RatesApi
+├── ShakeToClear.kt         # accelerometer shake-to-clear (lifecycle bugs #63–#67)
+├── WelcomeBack.kt          # "Welcome back" toast, lifecycle observer
+├── UsageTimer.kt           # "Active time" ticker
+├── LcdTexture.kt           # display background bitmap (performance bugs #68–#72)
+├── InputLog.kt             # per-keystroke input log file
+├── Startup.kt              # startup "warm-up" + debug StrictMode
+├── Accessibility.kt        # display semantics, keypad text size (a11y/i18n bugs #78–#82)
+│  History
+├── History.kt              # HistoryManager (prefs, callbackFlow), HistoryList, async stats
+├── HistoryNav.kt           # Navigation Compose NavHost: list → detail (bugs #48–#52)
+├── ScrollToTop.kt          # "↑ Top" button in History
+├── BackupWorker.kt         # @HiltWorker history backup, BackupStore, BackupScheduler (bugs #73–#77)
+│  Settings and DI
+├── SettingsScreen.kt       # dark mode, haptics, decimal places, session stats, backup section
+├── SettingsViewModel.kt    # @HiltViewModel for Settings
+├── BackupSection.kt        # "Back up now" button + status
+├── Di.kt                   # Hilt modules, qualifiers, AppEntryPoint service locator
+└── Services.kt             # SessionTracker, SettingsStore (+ impls), ClipboardHelper
+
+app/src/test/…              # JVM unit tests (testing bugs #53–#55)
+app/src/androidTest/…       # Compose UI + Hilt tests, HiltTestRunner (testing bugs #56–#57)
+app/src/main/res/values*/   # strings.xml (+ values-es), used by a few screens only
+app/schemas/                # exported Room schemas (v1 is needed for bug #47)
 ```
 
 ## Conventions for fixes
