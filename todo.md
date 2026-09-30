@@ -344,7 +344,52 @@ The app is only partly moved to Hilt. `CalcApp` is annotated `@HiltAndroidApp`, 
 
 ## Navigation Compose
 
-<!-- placeholder: bugs #48–#52 (navigation) -->
+The top level of the app still uses the `currentScreen` string (see #8). Inside History, though, there is a small Navigation Compose flow: `HistoryScreen` hosts a `NavHost` with the list as the start destination, and the `›` button on each row opens an entry screen with the expression, the result and a "Delete entry" button. Tapping the row text itself still loads the result into the calculator (#25). These bugs cover route arguments, the back stack, `popBackStack`, ViewModel scoping and observing the current destination.
+
+> ⚠️ On the entry screen, #51 means you only ever see the **first** entry you opened since the app started. To try #48 on several entries, close the app with Back or force-stop it between tries, or fix #51 first.
+
+- [ ] **48. The entry screen shows a slightly different result than the list** *(the crash part only shows after fixing #36, and before fixing #21)*
+  - Steps: `0`, `.`, `1`, `+`, `0`, `.`, `2`, `=`. Open History and tap `›` on that row. Also try `1`, `÷`, `3`, `=`.
+  - Expected: the entry screen shows the same result as the list, `0.30000000000000004`.
+  - Actual: it shows `0.30000001192092896`. `1÷3` shows `0.3333333432674408` instead of `0.3333333333333333`. And once #36 is fixed, tapping `›` on `999+1 = 1,000` crashes with `IllegalArgumentException: Navigation destination that matches route detail/999+1/1,000 cannot be found in the navigation graph`.
+  <details><summary>Hint</summary>Look at how the route is built in <code>HistoryList</code> and how the <code>result</code> argument is declared in <code>HistoryScreen</code>. The formatted display text is squeezed into a <code>Float</code>, which has about 7 significant digits, and <code>1,000</code> isn't a valid float at all, so the route doesn't match any destination. What should a route carry: display text, or a stable ID the next screen can use to look the data up? Also think about characters like <code>/</code>, <code>?</code>, <code>#</code> and <code>%</code> in a string route, and how type-safe routes (<code>@Serializable</code> classes) change this.</details>
+
+- [ ] **49. A quick double tap on `›` opens the entry screen twice**
+  - Steps: History → double-tap `›` on any row quickly → press system Back.
+  - Expected: one Back press returns to the list.
+  - Actual: you're still on the entry screen. You need to press Back twice.
+  <details><summary>Hint</summary>Every tap calls <code>navigate()</code>, and nothing stops the second one while the first transition is still running. Compare <code>launchSingleTop = true</code> with ignoring clicks unless the current back stack entry is <code>RESUMED</code>. Which one fits a detail screen whose argument changes? Interviewers like this one because it's a real crash-report and QA favourite.</details>
+
+- [ ] **50. Deleting an entry leaves a blank History screen**
+  - Steps: History → `›` on any row → Delete entry.
+  - Expected: you're back on the list, and the entry is gone.
+  - Actual: everything under the "All calculations" label is empty. Back exits the app. The list only comes back after you switch to Calc and back to History.
+  <details><summary>Hint</summary>Read the <code>popBackStack</code> call in <code>HistoryDetail</code>. What does <code>inclusive = true</code> do to the start destination, and what does a <code>NavHost</code> draw when its back stack is empty? Be ready to explain the difference between <code>popBackStack()</code>, <code>popBackStack(route, inclusive)</code>, <code>navigateUp()</code> and <code>navigate(…) { popUpTo(…) }</code>.</details>
+
+- [ ] **51. The entry screen always shows the first entry you opened**
+  - Steps: do `2+2=` and `5×6=`. History → `›` on `2+2 = 4` → Back → `›` on `5×6 = 30`.
+  - Expected: the second entry screen shows `5×6` and `30`.
+  - Actual: it still shows `2+2` and `4`. Rotating doesn't help. It only resets when you leave the app with Back or the process dies.
+  <details><summary>Hint</summary>Where is <code>HistoryDetailViewModel</code> created, and which <code>ViewModelStoreOwner</code> is in scope there? A <code>viewModel()</code> call outside the <code>NavHost</code> is owned by the Activity, so every entry screen shares one instance, and the "don't load twice" guard does the rest. Inside a <code>composable { }</code> destination, the owner is the <code>NavBackStackEntry</code>. When do you want each scope? Also: why is reading the argument from <code>SavedStateHandle</code> better than passing it into a <code>load()</code> function?</details>
+
+- [ ] **52. The "‹ Back" link and the "Calculation" title never appear on the entry screen**
+  - Steps: History → `›` on any row. Rotate the device too.
+  - Expected: the label above the content changes to "Calculation", and a "‹ Back" link appears next to it.
+  - Actual: it always says "All calculations", and there's no "‹ Back" link.
+  <details><summary>Hint</summary><code>HistoryHeader</code> reads <code>navController.currentDestination</code> during composition. That's a plain property, not Compose state, so nothing recomposes the header when you navigate. And on the first composition the graph isn't even set yet. Which <code>NavController</code> API gives you the current back stack entry as <code>State</code>?</details>
+
+**Bad practices in this area**
+
+- [ ] String routes (`"detail/{expression}/{result}"`) are built by hand with string concatenation and compared as strings in several places. Use `@Serializable` route classes (type-safe navigation).
+- [ ] `NavController` is passed down into `HistoryList` and `HistoryDetail`. Screens should take lambdas such as `onOpenEntry(id)` and `onBack()`, so they can be previewed and tested without navigation.
+- [ ] `HistoryDetailViewModel` has no `SavedStateHandle` and gets its data through a `load()` call from a `LaunchedEffect`, with a hand-rolled `loaded` flag.
+- [ ] Deleting an entry changes `HistoryManager.items` straight from a click handler in the UI.
+- [ ] Two navigation systems live side by side: the global `currentScreen` string and a nested `NavHost`.
+
+**Stretch goals**
+
+- [ ] Replace `currentScreen` with a single app-level `NavHost` (Calc, History, Settings) and keep History's detail as a nested graph. Make sure Back works everywhere (#8).
+- [ ] Write a Compose UI test with `TestNavHostController` that opens an entry, deletes it, and checks that the back stack still holds the list.
 
 ## Testing
 
