@@ -25,6 +25,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.navigation.NavController
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.awaitClose
@@ -90,7 +91,7 @@ object HistoryManager {
 }
 
 @Composable
-fun HistoryScreen() {
+fun HistoryList(navController: NavController) {
     val items = HistoryManager.items
 
     Column(modifier = Modifier
@@ -121,18 +122,23 @@ fun HistoryScreen() {
 
         Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
             for (item in items.reversed()) {
-                Text(
-                    text = item,
-                    fontSize = 20.sp,
-                    color = MaterialTheme.colorScheme.onBackground,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable {
-                            selectedHistoryItem = item.split(" = ")[1]
-                            currentScreen = "calculator"
-                        }
-                        .padding(vertical = 14.dp)
-                )
+                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = item,
+                        fontSize = 20.sp,
+                        color = MaterialTheme.colorScheme.onBackground,
+                        modifier = Modifier
+                            .weight(1f)
+                            .clickable {
+                                selectedHistoryItem = item.split(" = ")[1]
+                                currentScreen = "calculator"
+                            }
+                            .padding(vertical = 14.dp)
+                    )
+                    TextButton(onClick = { navController.navigate("detail/" + item.replace(" = ", "/")) }) {
+                        Text("›", fontSize = 24.sp)
+                    }
+                }
                 HorizontalDivider()
             }
         }
