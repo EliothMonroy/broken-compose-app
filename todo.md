@@ -287,7 +287,60 @@ The app is only partly moved to Hilt. `CalcApp` is annotated `@HiltAndroidApp`, 
 
 ## Room
 
-<!-- placeholder: bugs #43–#47 (room) -->
+**Long-press `MR`** to open **Constants**: you can save named numbers (for example `tax = 0.16`) and tap one to insert it into the expression. The constants live in a Room database (`ConstantsDb.kt`), and the dialog is in `ConstantsDialog.kt`. These bugs cover column types, threading rules, database instances and invalidation, transactions, and migrations.
+
+> ⚠️ **#45 makes the list lag behind the database.** After you add, edit or delete a constant, close the dialog and open it again to see what's really stored, or fix #45 first. Also, the calculator clears itself 30 seconds after it opens (#30), so do the calculator part of each test quickly.
+
+- [ ] **43. Tapping a saved constant inserts a slightly wrong number**
+  - Steps: long-press `MR` → Name `tax`, Value `0.16` → Save → Close. Long-press `MR` again, tap `tax = 0.16`, then press `×`, `1`, `0`, `0`, `=`.
+  - Expected: `0.16` is inserted and the result is `16`.
+  - Actual: `0.1599999964237213` is inserted and the result is `15.999999642372131`, even though the list says `0.16`. Big values lose digits too: `1234567.89` is saved as `1234567.9`.
+  <details><summary>Hint</summary>Look at the type of <code>value</code> in the <code>Constant</code> entity. How many significant digits does a <code>Float</code> have, and why does the list still look right? Follow-up questions: SQLite stores both <code>Float</code> and <code>Double</code> as <code>REAL</code>, so does changing the Kotlin type need a migration, and what happens to rows that are already saved? How would you store money exactly?</details>
+
+- [ ] **44. Long-pressing a constant to delete it crashes the app**
+  - Steps: save any constant, reopen the dialog, then long-press the constant.
+  - Expected: it's deleted.
+  - Actual: `IllegalStateException: Cannot access database on the main thread since it may potentially lock the UI for a long period of time.` (After you fix this, the row may still show until you reopen the dialog. That's #45.)
+  <details><summary>Hint</summary>Compare <code>deleteById</code> with <code>insert</code> in <code>ConstantsDao</code>, and look at where <code>Constants.delete</code> is called from. Why does Room check this at runtime? Why is <code>allowMainThreadQueries()</code> the wrong answer? Bonus: a destructive action with no confirmation and no undo.</details>
+
+- [ ] **45. A new constant doesn't show up in the list until you reopen the dialog**
+  - Steps: run `adb logcat -s ConstantsDb`. Long-press `MR`, add `tax` = `0.16`, then Save.
+  - Expected: `tax = 0.16` appears in the list straight away.
+  - Actual: the form clears but the list still says "No constants yet". Close and reopen the dialog and it's there. Logcat prints `Opening constants database` on every open and every save.
+  <details><summary>Hint</summary>How many <code>RoomDatabase</code> objects exist? A Room <code>Flow</code> only re-runs its query when a write goes through <b>the same</b> database instance, because change tracking lives inside that instance. Look at <code>ConstantsModule</code> and compare it with bug #39. Follow-up questions: what does <code>enableMultiInstanceInvalidation()</code> do, and why isn't it the fix here? What does each extra instance cost?</details>
+
+- [ ] **46. Renaming a constant to a name that's already taken deletes it**
+  - Steps: save `tax` = `0.16` and `vat` = `0.08`. Reopen the dialog, tap **Edit** next to `tax`, change the name to `vat`, then tap Update. Close and reopen the dialog.
+  - Expected: a "vat already exists" message, and both constants are unchanged.
+  - Actual: the message appears, but `tax` is gone.
+  <details><summary>Hint</summary><code>Constants.update</code> does two separate writes. What happens to the first one when the second one throws? Look into <code>@Transaction</code> and <code>withTransaction</code>. Also ask whether "delete, then insert" is the right way to edit a row at all: what happens to its <code>id</code>, and what would <code>@Update</code> do? Interview follow-up: why would switching the insert to <code>OnConflictStrategy.REPLACE</code> hide the message but silently delete <code>vat</code> instead?</details>
+
+- [ ] **47. After updating the app, opening Constants crashes**
+  - Steps: this needs an old build installed first. The first release of the feature had database version 1 and no index on `name`. Its schema is in `app/schemas/…ConstantsDatabase/1.json`.
+    1. In `ConstantsDb.kt`, temporarily change `version = 2` to `version = 1`, and remove `indices = [Index(value = ["name"], unique = true)]` from `@Entity`.
+    2. `./gradlew installDebug`, open the app, and save a constant.
+    3. Undo both edits and run `./gradlew installDebug` again. Don't uninstall the app.
+    4. Long-press `MR`.
+  - Expected: the dialog opens, and the saved constant is still there.
+  - Actual: `IllegalStateException: A migration from 1 to 2 was required but not found.`
+  <details><summary>Hint</summary>Someone added the unique index and bumped the version, but never told Room how to move existing users from 1 to 2. Look at <code>Migration</code> and <code>addMigrations</code>, or <code>@AutoMigration</code>, which is why the old schema JSON is checked in. Why is <code>fallbackToDestructiveMigration()</code> not a fix for users' data? And what should a migration do if an old database already has two constants with the same name? How would you test a migration without reinstalling by hand? (Look at <code>MigrationTestHelper</code>.)</details>
+
+**Bad practices in this area**
+
+- [ ] `Constants` is a global object that fetches the DAO through an entry point (built on `MainActivity.instance`) on every call.
+- [ ] The composable talks to the DAO directly. There's no repository and no ViewModel, and the query `Flow` is created in the UI.
+- [ ] `ConstantsDao` mixes `suspend` and blocking functions without a reason.
+- [ ] Validation by catching `SQLiteConstraintException` in the UI, instead of checking first or returning a result.
+- [ ] `valueText.toFloatOrNull() ?: 0f` silently saves `0` for bad input, and the Value field doesn't use a number keyboard.
+- [ ] The Room entity is used directly as the UI model, and the database name is a hard-coded string.
+- [ ] `showConstants` is global mutable state, and the only way to open the dialog is a hidden long-press with no accessibility action.
+
+**Stretch goals**
+
+- [ ] Write a `MigrationTestHelper` test for version 1 → 2 using the exported schemas in `app/schemas`.
+- [ ] Write DAO tests with `Room.inMemoryDatabaseBuilder`, including one that proves the edit flow (#46) is atomic.
+- [ ] Add a `ConstantsRepository` and a `@HiltViewModel` that exposes the list as a `StateFlow` with `stateIn`.
+- [ ] Replace delete-then-insert with `@Update` or `@Upsert`, and explain when each one is right.
 
 ## Navigation Compose
 
