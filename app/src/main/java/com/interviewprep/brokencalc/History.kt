@@ -94,6 +94,7 @@ object HistoryManager {
 @Composable
 fun HistoryList(navController: NavController) {
     val items = HistoryManager.items
+    val scrollState = rememberScrollState()
 
     Column(modifier = Modifier
         .fillMaxSize()
@@ -106,6 +107,7 @@ fun HistoryList(navController: NavController) {
             )
             Spacer(modifier = Modifier.weight(1f))
             SavingIndicator()
+            ScrollToTopButton(scrollState)
             TextButton(onClick = { HistoryManager.clear() }) {
                 Text("Clear history")
             }
@@ -121,7 +123,7 @@ fun HistoryList(navController: NavController) {
             )
         }
 
-        Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+        Column(modifier = Modifier.verticalScroll(scrollState)) {
             for (item in items.reversed()) {
                 Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Text(

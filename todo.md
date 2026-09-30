@@ -556,7 +556,60 @@ To simulate process death: press Home, run `adb shell am kill com.interviewprep.
 
 ## Performance and recomposition
 
-<!-- placeholder: bugs #68–#72 (performance) -->
+None of these crash anything. The app just does more work than it needs to, does it on the wrong thread, or does it at the wrong time. In an interview "it feels slow" isn't an answer, so each bug comes with a way to **measure** it:
+
+- Android Studio's **Layout Inspector**, with "Show recomposition counts" turned on.
+- `adb shell dumpsys gfxinfo com.interviewprep.brokencalc` for frame times. Add `reset` to start counting from zero.
+- `adb shell am start -W -n com.interviewprep.brokencalc/.MainActivity` for startup time (`TotalTime`).
+- **StrictMode**, which debug builds now turn on in `startupTasks()` (`Startup.kt`). It logs to `adb logcat -s StrictMode`.
+
+The numbers below come from an API 37 emulator on a fast laptop. A cheap phone will be several times slower.
+
+> ⚠️ Once you leave the calculator screen, #31 floods logcat and can push StrictMode lines out of the buffer. Check logcat right after a fresh start, or fix #31 first. #68 only shows while the gray preview is visible, and #29 sometimes hides the preview. Try again if it disappears.
+
+- [ ] **68. The `=` key recomposes about 60 times a second while it glows**
+  - Steps: type `2`, `+`, `3` and wait for the gray `= 5` preview. The `=` key starts to pulse. Don't touch anything, and watch the recomposition count of the `CalcButton` for `=` in Layout Inspector.
+  - Expected: the pulse only changes how the key is drawn. The button recomposes when the pulse starts and when it stops, and the count doesn't move in between.
+  - Actual: the count goes up by about 60 every second (we saw about 190 in 3 seconds of doing nothing). Every other key stays at 0, so it's only this one, but it recomposes on every animation frame for as long as the preview is showing.
+  <details><summary>Hint</summary>Where is the animated value read: in the composable body, or inside a lambda that runs later? Compose has three phases: composition, layout and drawing. A value that only changes how something is <i>drawn</i> can be read in the draw phase, for example in <code>Modifier.drawBehind { }</code> or <code>Modifier.graphicsLayer { alpha = … }</code>, and then composition and layout are skipped for every frame. With that change the count stays still while the key keeps pulsing. Interview angle: "what does deferring state reads mean?", and why a composable might take a <code>() -> Float</code> instead of a <code>Float</code>.</details>
+
+- [ ] **69. The "↑ Top" button in History recomposes on every pixel you scroll**
+  - Steps: do about 20 calculations so the History list is longer than the screen. Open History and scroll down until "↑ Top" appears next to "Clear history". Watch `ScrollToTopButton` in Layout Inspector while you scroll up and down.
+  - Expected: it recomposes when it appears and when it disappears, and not in between.
+  - Actual: it recomposes on every frame of the scroll. One swipe gave about 50 recompositions, even though the button appeared only once.
+  <details><summary>Hint</summary><code>scrollState.value</code> changes on every scrolled pixel, but the button only cares whether it's above 300. Which API turns a state that changes often into one that only changes when the <i>result</i> changes? Know when <code>derivedStateOf</code> is worth it and when it's just overhead (it isn't needed when the input and the output change at the same rate). Follow-up: what would happen if <code>scrollState.value</code> were read one level higher, in <code>HistoryList</code>?</details>
+
+- [ ] **70. Every key press makes the UI stutter**
+  - Steps: run `adb shell dumpsys gfxinfo com.interviewprep.brokencalc reset`. Type `1`, `2`, `3`, `C`, `4`, `5`, `6`, `C`, `7`, `8` at a normal pace, then run `adb shell dumpsys gfxinfo com.interviewprep.brokencalc`. You can also record a CPU trace or watch allocations in the Android Studio profiler.
+  - Expected: a key press costs a few milliseconds on the main thread. The 99th percentile frame time stays around 20 ms.
+  - Actual: every key press spends about 35–55 ms on the main thread building a new 2 MB `Bitmap` (1079 × 473 pixels on the emulator). The 99th percentile goes up to about 65 ms, compared with about 20 ms without this bug, and the frame for each key press takes 50–65 ms. The profiler shows a new 2 MB allocation on every key press.
+  <details><summary>Hint</summary>Look at <code>rememberLcdTexture</code>. What does the texture actually depend on, and what is it keyed on? A <code>remember</code> key should list exactly the inputs of the calculation, no more and no fewer. Then ask whether this work belongs in composition at all. It could be drawn directly with <code>drawBehind</code> and a <code>Brush</code>, or built once off the main thread. Bonus: <code>setPixel</code> in a loop vs <code>setPixels</code> with an <code>IntArray</code>, and what happens to the texture's width after a rotation.</details>
+
+- [ ] **71. Typing reads and writes a file on the main thread**
+  - Steps: start the app fresh, run `adb logcat -s StrictMode`, then type a few digits.
+  - Expected: no StrictMode output while typing.
+  - Actual: every key press logs several `DiskReadViolation`s and a `DiskWriteViolation`, each taking a few milliseconds, with a stack trace that goes through `InputLog.record` and the `LaunchedEffect` in `CalculatorScreen`. The whole file is read, rewritten and `fsync`ed every time the display changes.
+  <details><summary>Hint</summary>The comment says "in the background". Which thread does a <code>LaunchedEffect</code> run on? A coroutine isn't a thread: this one runs on the main thread until something switches it, for example <code>withContext(Dispatchers.IO)</code>. After that, think about the design. Rewriting the whole file on every key press, an <code>fsync</code> on every write, and two quick key presses could write at the same time. Would appending, batching or <code>debounce</code> be better? Also ask why an app needs a file with everything the user typed.</details>
+
+- [ ] **72. The app takes about half a second longer to open, and rotating freezes it**
+  - Steps: run `adb shell am force-stop com.interviewprep.brokencalc`, then `adb shell am start -W -n com.interviewprep.brokencalc/.MainActivity`, a few times, and read `TotalTime`. Then rotate the device.
+  - Expected: startup is as fast as the app can draw its first frame, and rotating is instant.
+  - Actual: `TotalTime` is about 1.4 s instead of about 0.85 s, and the screen freezes for 0.7–1 s on every rotation. Before the first frame, the main thread evaluates the same expression 120,000 times.
+  <details><summary>Hint</summary>Look at <code>startupTasks()</code>, which <code>MainActivity.onCreate</code> calls. Is "warming up the JIT" by hand a real fix for a slow first calculation? Anything in <code>onCreate</code> delays the first frame, and <code>onCreate</code> runs again after every configuration change. Interview angle: how you'd measure startup (<code>am start -W</code>, the <code>Displayed</code> line in logcat, Macrobenchmark), what Baseline Profiles do, and how you'd delay or move startup work (lazy initialisation, a background thread, the App Startup library).</details>
+
+**Bad practices in this area**
+
+- [ ] StrictMode only logs (`penaltyLog()`), so violations pile up and nobody notices. Consider `penaltyDialog()` or `penaltyDeath()` in debug builds, and a `VmPolicy` as well (leaked closeables, leaked activities).
+- [ ] `CalcRow` gets a new `listOf(…)` on every recomposition, so it can never be skipped. The Compose compiler reports show which composables are skippable and which parameters are unstable.
+- [ ] The display width comes from `LocalConfiguration.screenWidthDp` and the height `180.dp` is duplicated in `LcdTexture.kt`, instead of using the size that's actually drawn (`size` inside `drawBehind`, or `onSizeChanged`).
+- [ ] Magic numbers everywhere: the `300` px scroll threshold, 50 log lines, 120,000 warm-up rounds.
+- [ ] No performance tests at all: no Macrobenchmark, no Baseline Profile, no `JankStats`.
+
+**Stretch goals**
+
+- [ ] Turn on the Compose compiler reports (`composeCompiler { reportsDestination = … }`) and read what they say about `CalcButton` and `CalcRow`.
+- [ ] Add a Macrobenchmark module that measures cold startup and a "type 20 keys" scenario with `FrameTimingMetric`. Then add a Baseline Profile and compare.
+- [ ] Track jank in the app with `JankStats` and log the slow frames with the current screen as state.
 
 ## WorkManager
 
