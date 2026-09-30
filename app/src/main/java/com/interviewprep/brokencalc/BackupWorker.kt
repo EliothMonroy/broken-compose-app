@@ -41,6 +41,7 @@ class BackupWorker @AssistedInject constructor(
         val history = inputData.getStringArray("history")?.toList() ?: HistoryManager.items.toList()
         Log.d("BackupWorker", "Backing up " + history.size + " entries")
         backupStore.write(history)
+        Notifications.showBackupDone(applicationContext, history.size)
         return Result.success()
     }
 }
