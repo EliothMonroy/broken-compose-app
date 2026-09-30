@@ -19,9 +19,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.hilt.navigation.compose.hiltViewModel
 
 @Composable
 fun SettingsScreen() {
+    val settingsVm: SettingsViewModel = hiltViewModel()
     var darkMode by remember { mutableStateOf(MainActivity.prefs.getBoolean("dark_mode", false)) }
     var precision by remember { mutableStateOf(MainActivity.prefs.getInt("precision", 10).toFloat()) }
 
@@ -47,6 +49,21 @@ fun SettingsScreen() {
             Switch(checked = darkMode, onCheckedChange = { darkMode = it })
         }
 
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "Haptic feedback",
+                fontSize = 18.sp,
+                color = MaterialTheme.colorScheme.onBackground,
+                modifier = Modifier.weight(1f)
+            )
+            Switch(checked = settingsVm.hapticsEnabled, onCheckedChange = { settingsVm.onHapticsChanged(it) })
+        }
+
         Text(
             text = "Decimal places: " + precision.toInt(),
             fontSize = 18.sp,
@@ -61,9 +78,15 @@ fun SettingsScreen() {
         )
 
         Text(
+            text = settingsVm.sessionSummary(),
+            color = MaterialTheme.colorScheme.onBackground,
+            modifier = Modifier.padding(top = 32.dp)
+        )
+
+        Text(
             text = "Broken Calc v1.0",
             color = Color.Gray,
-            modifier = Modifier.padding(top = 48.dp)
+            modifier = Modifier.padding(top = 16.dp)
         )
     }
 }

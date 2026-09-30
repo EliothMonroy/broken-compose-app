@@ -8,6 +8,7 @@ import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import javax.inject.Inject
 import kotlin.random.Random
 
 @OptIn(DelicateCoroutinesApi::class)
@@ -16,6 +17,9 @@ class CalculatorViewModel : ViewModel() {
     var display by mutableStateOf("")
     var preview by mutableStateOf("")
     var justEvaluated = false
+
+    @Inject
+    lateinit var clipboardHelper: ClipboardHelper
 
     fun onButton(label: String) {
         val before = display
@@ -81,6 +85,13 @@ class CalculatorViewModel : ViewModel() {
         }
     }
 
+    fun copyResult() {
+        val text = display
+        GlobalScope.launch {
+            clipboardHelper.copy(text)
+        }
+    }
+
     // shows the result while you type
     fun updatePreview() {
         val expression = display
@@ -104,8 +115,10 @@ class CalculatorViewModel : ViewModel() {
                 display = formatted
                 justEvaluated = true
                 HistoryManager.add(expression + " = " + formatted)
+                appEntryPoint().sessionTracker().calculations++
             } catch (e: IllegalStateException) {
                 display = "Error"
+                appEntryPoint().sessionTracker().errors++
             }
         }
     }

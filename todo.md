@@ -249,6 +249,42 @@ These cover what interviewers usually ask about: scopes, cancellation, dispatche
   - Actual: `2+2 = 4` is gone after the restart, and so is every later calculation. Logcat shows a single `AppScope: Background work failed … Can't save Infinity to memory`.
   <details><summary>Hint</summary><code>appScope</code> is built on a plain <code>Job()</code>. When one child fails, the whole scope is cancelled, and every later <code>appScope.launch</code> silently does nothing. The <code>CoroutineExceptionHandler</code> only logs the failure, which hides the problem. <code>SupervisorJob()</code> keeps the siblings alive. Also ask: should a <code>require</code> run inside a fire-and-forget coroutine at all, or should the input be checked before launching?</details>
 
+## Dependency injection (Hilt)
+
+The app is only partly moved to Hilt. `CalcApp` is annotated `@HiltAndroidApp`, and there are modules, qualifiers and an entry point in `Di.kt`, but most of the code still reaches into global objects. These bugs cover scoping, qualifiers, `@Binds`, entry points, and who actually creates an object.
+
+> ⚠️ **#38 crashes the Settings screen.** You'll need to fix it before you can work on #6, #16, #18, #39 or #40.
+
+- [ ] **38. Opening Settings crashes the app**
+  - Steps: tap **Settings**.
+  - Expected: the Settings screen opens.
+  - Actual: `IllegalStateException: Given component holder class MainActivity does not implement interface dagger.hilt.internal.GeneratedComponent …`
+  <details><summary>Hint</summary><code>hiltViewModel()</code> needs the hosting Activity to be part of Hilt's component tree. Which annotation is missing, and why does this fail at runtime instead of at compile time?</details>
+
+- [ ] **39. "This session" in Settings always says 0 calculations and 0 errors**
+  - Steps: do a calculation and trigger an error (`5`, `+`, `÷`, `2`, `=`), then open Settings.
+  - Expected: `This session: 1 calculations, 1 errors`.
+  - Actual: `This session: 0 calculations, 0 errors`.
+  <details><summary>Hint</summary><code>SessionTracker</code> is annotated <code>@Singleton</code>, so why isn't it one? Look at <code>AppModule</code>: an explicit <code>@Provides</code> takes priority over the <code>@Inject constructor</code>, and that <code>@Provides</code> has no scope. Every injection and every <code>appEntryPoint().sessionTracker()</code> call gets a new instance. The fix can be deleting code. Follow-up questions: what does "scoped" actually mean in Dagger, and what's the difference between <code>Provider&lt;T&gt;</code> and <code>Lazy&lt;T&gt;</code>?</details>
+
+- [ ] **40. The "Haptic feedback" setting resets after restarting the app**
+  - Steps: Settings → turn off Haptic feedback → force-stop and reopen → Settings.
+  - Expected: it's still off.
+  - Actual: it's back on.
+  <details><summary>Hint</summary>Look at what <code>SettingsModule</code> <code>@Binds</code> <code>SettingsStore</code> to. Test and preview fakes shouldn't be bound in the production graph. They belong in the test source set, swapped in with <code>@TestInstallIn</code> or <code>@BindValue</code>.</details>
+
+- [ ] **41. Long-pressing the display to copy the result crashes the app**
+  - Steps: do a calculation, then long-press the big number.
+  - Expected: the result is copied and a "Copied …" toast appears.
+  - Actual: `UninitializedPropertyAccessException: lateinit property clipboardHelper has not been initialized`.
+  <details><summary>Hint</summary>Putting <code>@Inject</code> on a field does nothing unless <b>Hilt</b> creates the object, or an <code>@AndroidEntryPoint</code> injects it. <code>CalculatorViewModel</code> is created with <code>remember { CalculatorViewModel() }</code>. The proper fix is <code>@HiltViewModel</code> with constructor injection plus <code>hiltViewModel()</code>, which also fixes #26. Why is constructor injection better than field injection?</details>
+
+- [ ] **42. After fixing #41, copying still crashes, now when the toast is shown** *(you'll only see this after fixing #41)*
+  - Steps: long-press the result.
+  - Expected: the "Copied …" toast appears.
+  - Actual: `NullPointerException: Can't toast on a thread that has not called Looper.prepare()`.
+  <details><summary>Hint</summary>Read <code>AppModule</code> carefully. The function names say one thing, but the qualifiers say another. <code>@MainDispatcher</code> actually provides <code>Dispatchers.IO</code>, and the clipboard write is running on Main. How could a test catch a swapped binding like this?</details>
+
 ---
 
 ## Bad practices to refactor
@@ -262,6 +298,11 @@ These aren't user-visible bugs, but an interviewer will notice them. Being able 
 - [ ] Dispatchers are hard-coded everywhere (`Dispatchers.IO` for CPU work, `Default` for a timer), so the code can't be tested with a `TestDispatcher`.
 - [ ] Fake `delay`s and `Random` latency used to make things "feel" async.
 - [ ] `catch (e: Exception)` inside coroutines, which swallows cancellation.
+- [ ] `appEntryPoint()` acts as a service locator, and it's built on the static `MainActivity.instance`. Entry points are for code Hilt can't reach, not a shortcut to avoid constructor injection.
+- [ ] `EntryPointAccessors` is called on every button tap (`CalcButton`) and every calculation.
+- [ ] Half-migrated DI: `HistoryManager`, `Memory`, `appScope` and `MainActivity.prefs` are still global objects, and SharedPreferences is reached two different ways.
+- [ ] An `@Provides` that duplicates an `@Inject constructor`, and fakes (`InMemorySettingsStore`) living in the `main` source set.
+- [ ] Every module, qualifier and entry point is in one `Di.kt` file. `object` modules and `abstract` modules are mixed without a reason.
 - [ ] `SharedPreferences.commit()` on the main thread, and on **every recomposition** in `SettingsScreen`.
 - [ ] Side effects (prefs writes, state writes) directly in composable bodies.
 - [ ] Navigation with magic strings and an `if/else` chain. No type safety, no back stack.
@@ -289,6 +330,7 @@ These aren't user-visible bugs, but an interviewer will notice them. Being able 
 - [ ] Inject dispatchers into the ViewModel, then test the preview (#29), idle clear (#30) and stats (#34) with `runTest`, `StandardTestDispatcher` and virtual time (`advanceTimeBy`), so the tests don't actually wait.
 - [ ] Move to a single `CalculatorUiState` data class exposed as `StateFlow` and collected with `collectAsStateWithLifecycle()`.
 - [ ] Replace SharedPreferences with DataStore, and history with Room.
-- [ ] Add Hilt, or manual DI, so nothing reaches for a static Activity.
+- [ ] Finish the Hilt migration. Constructor-inject everything, including an `@ApplicationScope` `CoroutineScope` in place of `appScope`, a `@HiltViewModel` `CalculatorViewModel`, and repositories for history, memory and settings. Then delete `appEntryPoint()` and `MainActivity.instance`.
+- [ ] Write Hilt tests: use `HiltAndroidRule` with a custom test runner, replace `SettingsStore` with `@TestInstallIn` or `@BindValue`, and inject a `TestDispatcher` through the dispatcher qualifiers.
 - [ ] Use Navigation Compose with type-safe routes.
 - [ ] Add a landscape layout, for example a scientific keypad.
