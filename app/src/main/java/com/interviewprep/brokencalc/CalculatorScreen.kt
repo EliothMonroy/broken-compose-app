@@ -133,6 +133,7 @@ fun CalculatorScreen() {
     }
 
     ConstantsHost(vm)
+    TipSplitHost(displayText)
 }
 
 @Composable
@@ -184,7 +185,7 @@ fun CalcButton(label: String, vm: CalculatorViewModel, modifier: Modifier, heigh
             .clip(RoundedCornerShape(16.dp))
             .background(bg.copy(alpha = glow))
             .combinedClickable(
-                onLongClick = if (label == "MR") { { showConstants = true } } else null
+                onLongClick = if (label == "MR") { { showConstants = true } } else if (label == "%") { { showTipSplit = true } } else null
             ) {
                 if (appEntryPoint().settingsStore().hapticsEnabled) {
                     haptics.performHapticFeedback(HapticFeedbackType.LongPress)
