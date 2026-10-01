@@ -4,7 +4,7 @@
 
 **Broken Calc** is a Jetpack Compose calculator built for **Android interview practice**. It is *intentionally* buggy and *intentionally* written with bad Android/Kotlin/Compose practices. The user fixes these problems themselves to practise debugging, refactoring and explaining their reasoning.
 
-`todo.md` is the source of truth for the planted bugs (numbered 1–102), the bad-practice checklist, and stretch goals.
+`todo.md` is the source of truth for the planted bugs (numbered 1–102), the bad-practice checklist, and stretch goals. `README.md` is the short introduction for people.
 
 ## Rules for AI agents
 
@@ -108,7 +108,7 @@ app/schemas/                # exported Room schemas (v1 is needed for bug #47)
 
 Once the user starts fixing things, follow modern best practices *in the code they're changing*, and leave the rest of the codebase alone:
 
-- State hoisting, unidirectional data flow, and `StateFlow` or Compose state owned by a real ViewModel (`viewModel()`).
+- State hoisting, unidirectional data flow, and `StateFlow` or Compose state owned by a real ViewModel (`hiltViewModel()` when it has injected dependencies, `viewModel()` otherwise).
 - `viewModelScope`, not `GlobalScope`.
 - Composables take `modifier: Modifier = Modifier` and state plus lambdas, not whole ViewModels.
 - Strings in `strings.xml`, colours from `MaterialTheme`.
