@@ -12,6 +12,20 @@ Use it to practise the kind of debugging and refactoring you'd get in an Android
 
 Each bug has **Steps**, **Expected** and **Actual** sections. Hints are collapsed so you only see them if you want them.
 Some bugs share a root cause, and fixing one can uncover another. That's intentional.
+The first three sections (Easy, Medium, Hard) cover the core calculator. The sections after them are grouped by topic.
+
+**Before you start: bugs that get in the way of other bugs**
+
+A few bugs block or disturb others. Fix them early, or keep them in mind:
+
+- **#38: opening Settings crashes the app.** Everything in Settings is out of reach until it's fixed: #6, #7, #16, #18, #39, #40, the WorkManager section (#73–#77) and the Permissions section (#93–#97).
+- **#36: History crashes once any result is 1,000 or more.** Avoid big results while you work on History bugs, or fix #36 early. (It also hides #22.)
+- **#31: leaving the calculator screen slows the whole app down,** and its log spam pushes other lines out of logcat. After a few trips, `=` stops working.
+- **#30: the display clears itself about 30 seconds after the calculator opens,** so do the calculator part of a test quickly.
+- **#67: after a shake, rotating or pressing Home crashes the app.**
+- Some sections have a bug that hides the rest of that section: #58 (converter), #88 (search) and #93 (Export). Each section says so at the top.
+
+To rotate an emulator that has auto-rotate turned off, run `adb shell settings put system user_rotation 1`, and `user_rotation 0` to go back.
 
 ---
 
@@ -148,9 +162,9 @@ Some bugs share a root cause, and fixing one can uncover another. That's intenti
   <details><summary>Hint</summary>There are three problems here. (a) <code>format</code> adds grouping separators that end up back in the input. (b) The tokenizer treats <code>,</code> as a separator between two numbers. (c) The parser never checks that it used up every token, so trailing tokens are silently dropped. <code>2(3)</code> and <code>5)</code> show (c) too. Bonus: <code>String.format</code> without a <code>Locale</code> behaves differently in, say, <code>de_DE</code>.</details>
 
 - [ ] **22. History is corrupted after restarting the app**
-  - Steps: calculate `999+1` so the result is `1,000`, then force-stop and reopen the app, then open History.
-  - Expected: one entry, `999+1 = 1,000`.
-  - Actual: two entries, `999+1 = 1` and `000`. Tapping `000` crashes the app.
+  - Steps: calculate `999+1` so the result is `1,000`, then force-stop and reopen the app. Look at the History button in the top bar.
+  - Expected: `History (1)`, with one entry, `999+1 = 1,000`.
+  - Actual: `History (2)`. Opening History crashes because of #36, so fix that one first to see the list: it has two entries, `999+1 = 1` and `000`, and tapping `000` crashes the app.
   <details><summary>Hint</summary>History is saved as one string joined with <code>,</code>. What's a better storage format? Consider JSON, a <code>StringSet</code>, DataStore or Room. Also, <code>split(" = ")[1]</code> assumes the format without checking.</details>
 
 - [ ] **23. History entries are duplicated after rotating**
@@ -168,11 +182,11 @@ Some bugs share a root cause, and fixing one can uncover another. That's intenti
 - [ ] **25. After picking a history entry, the calculator stops responding to input**
   - Steps: History → tap any entry → try typing digits or pressing `C`.
   - Expected: the result loads, then you can keep going from there.
-  - Actual: the display is stuck on that value. Every key press is undone straight away.
+  - Actual: the display is stuck on that value. Every key press is undone straight away. (The gray preview underneath may show what you typed, which makes it even more confusing.)
   <details><summary>Hint</summary><code>CalculatorScreen</code> writes state during composition and never clears <code>selectedHistoryItem</code>. Every recomposition resets the display. Side effects belong in effects or event handlers.</details>
 
 - [ ] **26. Input is lost on rotation, and when switching to History or Settings and back**
-  - Steps: type `123+`, then rotate, or open Settings and come back.
+  - Steps: type `123+`, then rotate, or open History and come back.
   - Expected: `123+` is still there.
   - Actual: the display goes back to `0`.
   <details><summary>Hint</summary><code>remember { CalculatorViewModel() }</code> is not how you get a ViewModel. Look at <code>viewModel()</code> from <code>lifecycle-viewmodel-compose</code>, and at <code>SavedStateHandle</code> for process death.</details>
@@ -208,7 +222,7 @@ These cover what interviewers usually ask about: scopes, cancellation, dispatche
   <details><summary>Hint</summary><code>LaunchedEffect(Unit)</code> never restarts. What should its key be? Once the key is right, you probably don't need the counter at all.</details>
 
 - [ ] **31. Leaving the calculator pegs the CPU, and after a few trips `=` stops working**
-  - Steps: open History or Settings, or rotate. Check the CPU in Android Studio's profiler, or run `adb shell top`, and watch `adb logcat -s IdleTimer`. Go back and forth about four times, then try `3`, `+`, `3`, `=`.
+  - Steps: open History, or rotate. Check the CPU in Android Studio's profiler, or run `adb shell top`, and watch `adb logcat -s IdleTimer`. Go back and forth about four times, then try `3`, `+`, `3`, `=`.
   - Expected: nothing runs once the calculator is off screen.
   - Actual: `IdleTimer: tick failed: The coroutine scope left the composition` is logged hundreds of thousands of times per second, CPU goes over 100%, and eventually `=` and the preview never produce anything.
   <details><summary>Hint</summary><code>catch (e: Exception)</code> also catches <code>CancellationException</code>. The loop never ends, and once the job is cancelled <code>delay()</code> throws straight away, so it spins on a <code>Dispatchers.Default</code> thread forever. Each trip adds another spinning thread until the default pool (one thread per CPU core) is full, and then <code>GlobalScope.launch</code> work for <code>=</code> never gets a thread. Rethrow <code>CancellationException</code>, or catch only what you mean to, and use <code>while (isActive)</code>. Why is <code>withContext(Dispatchers.Default)</code> pointless for a timer?</details>
@@ -220,7 +234,7 @@ These cover what interviewers usually ask about: scopes, cancellation, dispatche
   <details><summary>Hint</summary><code>runBlocking</code> on the main thread blocks it. <code>isSaving</code> goes <code>true</code> and back to <code>false</code> before a frame can be drawn. Use a scope tied to a lifecycle, and move the disk write to <code>Dispatchers.IO</code> with <code>withContext</code>. Why was <code>delay(800)</code> never the right fix for "nothing gets lost"?</details>
 
 - [ ] **33. The History badge leaks a listener every time the top bar recomposes** *(easiest to see once #31 is fixed)*
-  - Steps: run `adb logcat -s HistoryManager`. Do a calculation, switch between Calc and Settings a few times, then do another calculation.
+  - Steps: run `adb logcat -s HistoryManager`. Do a calculation, switch between Calc and History three times, then do another calculation.
   - Expected: `Notifying 1 listeners` every time.
   - Actual: the number keeps growing (1 → 7 → 13 …).
   <details><summary>Hint</summary>Two problems. <code>awaitClose { }</code> doesn't unregister the listener. And <code>HistoryManager.changes()</code> creates a <b>new</b> <code>Flow</code> on every recomposition, so <code>collectAsState</code> restarts the collection each time. Remove the listener in <code>awaitClose</code>, and expose one shared flow (for example <code>stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), …)</code>), or <code>remember</code> it. Bonus: <code>listeners</code> is an <code>ArrayList</code> changed on the main thread and iterated on a background thread.</details>
@@ -253,7 +267,7 @@ These cover what interviewers usually ask about: scopes, cancellation, dispatche
 
 The app is only partly moved to Hilt. `CalcApp` is annotated `@HiltAndroidApp`, and there are modules, qualifiers and an entry point in `Di.kt`, but most of the code still reaches into global objects. These bugs cover scoping, qualifiers, `@Binds`, entry points, and who actually creates an object.
 
-> ⚠️ **#38 crashes the Settings screen.** You'll need to fix it before you can work on #6, #16, #18, #39 or #40.
+> ⚠️ **#38 crashes the Settings screen.** You'll need to fix it before you can work on #6, #7, #16, #18, #39, #40, and the WorkManager (#73–#77) and Permissions (#93–#97) sections.
 
 - [ ] **38. Opening Settings crashes the app**
   - Steps: tap **Settings**.
@@ -968,7 +982,7 @@ These aren't user-visible bugs, but an interviewer will notice them. Being able 
 - [ ] Business logic, persistence and UI mixed together. `Calculator.format` reads SharedPreferences directly. `History.kt` has both storage and UI.
 - [ ] Composables take the whole `CalculatorViewModel` instead of state plus lambdas (hard to preview and test).
 - [ ] Composables have no `modifier: Modifier = Modifier` parameter, and `height: Int` is passed around instead of `Dp`.
-- [ ] Hard-coded strings (no `strings.xml`), colours, dimensions and font sizes everywhere. The app name is hard-coded in the manifest.
+- [ ] Hard-coded strings almost everywhere (only two are in `strings.xml`), plus hard-coded colours, dimensions and font sizes. The app name is hard-coded in the manifest.
 - [ ] Hard-coded colours instead of `MaterialTheme.colorScheme`. No typography or shapes in the theme.
 - [ ] `Box` + `clickable` for buttons: no button role for accessibility, no ripple customisation, `⌫` has no content description, touch targets are fixed.
 - [ ] `Column` + `verticalScroll` + `for` loop for a list that can grow without limit. Use `LazyColumn` with stable `key`s.
@@ -977,18 +991,18 @@ These aren't user-visible bugs, but an interviewer will notice them. Being able 
 - [ ] Java-style Kotlin: `for (i in 0 until expr.length)`, `"" + x` concatenation, `if (x) return a else return b`, `ArrayList` instead of `List`, `var` where `val` would do.
 - [ ] `String.format` without a `Locale`.
 - [ ] No `@Preview`s.
-- [ ] No tests at all.
+- [ ] Very few tests, and some of them are broken (see the Testing section). Most of the app has no tests at all.
 - [ ] No version catalog (`libs.versions.toml`). Versions are hard-coded in the Gradle files.
 - [ ] Manifest uses a platform `android:style` theme and the default system icon. `allowBackup="true"` with no backup rules.
 
 ## Stretch goals
 
-- [ ] Add unit tests for `Calculator` (tokenizer, parser, formatter) covering every math bug above.
+- [ ] Extend the `Calculator` unit tests (tokenizer, parser, formatter) so every math bug above has a test.
 - [ ] Add a Compose UI test for the history → calculator flow (#25) and the input-preservation bug (#26).
 - [ ] Inject dispatchers into the ViewModel, then test the preview (#29), idle clear (#30) and stats (#34) with `runTest`, `StandardTestDispatcher` and virtual time (`advanceTimeBy`), so the tests don't actually wait.
 - [ ] Move to a single `CalculatorUiState` data class exposed as `StateFlow` and collected with `collectAsStateWithLifecycle()`.
 - [ ] Replace SharedPreferences with DataStore, and history with Room.
 - [ ] Finish the Hilt migration. Constructor-inject everything, including an `@ApplicationScope` `CoroutineScope` in place of `appScope`, a `@HiltViewModel` `CalculatorViewModel`, and repositories for history, memory and settings. Then delete `appEntryPoint()` and `MainActivity.instance`.
 - [ ] Write Hilt tests: use `HiltAndroidRule` with a custom test runner, replace `SettingsStore` with `@TestInstallIn` or `@BindValue`, and inject a `TestDispatcher` through the dispatcher qualifiers.
-- [ ] Use Navigation Compose with type-safe routes.
-- [ ] Add a landscape layout, for example a scientific keypad.
+- [ ] Use Navigation Compose with type-safe routes for the whole app. Today only History's detail flow uses it, with string routes.
+- [ ] Add a layout for phones in landscape, for example a scientific keypad. Tablets already get two panes.
