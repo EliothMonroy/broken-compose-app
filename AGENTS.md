@@ -24,7 +24,7 @@
 - Kotlin 2.2, Jetpack Compose (Material 3, BOM `2025.09.00`), single Activity
 - AGP 8.13, Gradle 8.14 (wrapper included), JDK 17+
 - `minSdk 24`, `targetSdk`/`compileSdk 36`
-- Persistence: `SharedPreferences` (`calc_prefs`)
+- Persistence: `SharedPreferences` (`calc_prefs`) for history, memory and settings; a Room database for Constants; a few plain files in `filesDir` (backup, export, input log)
 - DI: Hilt 2.57 with KSP, only partly adopted on purpose (see bugs #38–#42)
 - More libraries are declared in `app/build.gradle.kts` for the newer bug categories: Room, Navigation Compose, Retrofit/OkHttp with kotlinx.serialization, WorkManager with hilt-work, Material 3 adaptive / window-size-class and Jetpack WindowManager, and test libraries. Each one is used by its own section in `todo.md`.
 
@@ -41,6 +41,8 @@ adb logcat -s AndroidRuntime     # watch for crashes
 ./gradlew testDebugUnitTest          # JVM unit tests (app/src/test)
 ./gradlew connectedDebugAndroidTest  # device/Compose/Hilt tests (app/src/androidTest); uninstalls the app afterwards
 ```
+
+`./gradlew lintDebug` also **fails on purpose** (6 errors): several planted bugs are things lint catches. Don't fix or suppress them unless asked.
 
 The test suite is **red on purpose**: some tests fail honestly because of app bugs, and others are themselves buggy (see the Testing section of `todo.md`). Don't "fix" them unless asked.
 
