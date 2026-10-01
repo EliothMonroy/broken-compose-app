@@ -24,6 +24,7 @@ A few bugs block or disturb others. Fix them early, or keep them in mind:
 - **#30: the display clears itself about 30 seconds after the calculator opens,** so do the calculator part of a test quickly.
 - **#67: after a shake, rotating or pressing Home crashes the app.**
 - Some sections have a bug that hides the rest of that section: #58 (converter), #88 (search) and #93 (Export). Each section says so at the top.
+- **The app remembers things between launches:** history, memory, constants, settings, and the app language. If a step gives a different number than the one written here, press `MC` and `C`, or start clean with `adb shell pm clear com.interviewprep.brokencalc`. That also resets the app language and the notification permission.
 
 To rotate an emulator that has auto-rotate turned off, run `adb shell settings put system user_rotation 1`, and `user_rotation 0` to go back.
 
@@ -56,7 +57,7 @@ To rotate an emulator that has auto-rotate turned off, run `adb shell settings p
   <details><summary>Hint</summary>Compare what the success path and the error path in <code>calculate()</code> do with <code>justEvaluated</code>. Why does the tokenizer accept letters at all?</details>
 
 - [ ] **5. `M−` adds to memory instead of subtracting**
-  - Steps: `5`, `M+`, `C`, `2`, `M−`, `C`, `MR`.
+  - Steps: `MC` first (memory is saved between launches), then `5`, `M+`, `C`, `2`, `M−`, `C`, `MR`.
   - Expected: `3`.
   - Actual: `7`.
   <details><summary>Hint</summary>Copy-paste bug.</details>
@@ -192,7 +193,7 @@ To rotate an emulator that has auto-rotate turned off, run `adb shell settings p
   <details><summary>Hint</summary><code>remember { CalculatorViewModel() }</code> is not how you get a ViewModel. Look at <code>viewModel()</code> from <code>lifecycle-viewmodel-compose</code>, and at <code>SavedStateHandle</code> for process death.</details>
 
 - [ ] **27. The memory indicator `M` doesn't show up after `M+`**
-  - Steps: press `5`, wait a second, then press `M+`.
+  - Steps: press `MC` and `C` first, so the memory is empty and no `M` is showing (memory is saved between launches). Then press `5`, wait a second, and press `M+`.
   - Expected: a small `M` appears above the display right away.
   - Actual: it only appears after you press another key. `MC` has the same problem in reverse.
   <details><summary>Hint</summary><code>Memory.value</code> is a plain <code>var</code>, so Compose has no way to know it changed.</details>
