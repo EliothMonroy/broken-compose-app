@@ -830,7 +830,61 @@ The History list now has a **search field**, filter chips (**All**, **No errors*
 
 ## Permissions, notifications and foreground services
 
-<!-- placeholder: bugs #93–#97 (permissions) -->
+Settings now has an **Export** section. **Export history** starts a foreground service (`ExportService.kt`) that writes your history to `files/history_export.csv` over a few seconds, shows a progress bar in a notification, and then posts an "Export done" notification that opens the app when you tap it. **Remind me** sets an alarm that posts "Time to review your history" in one hour (`ReviewReminder.kt`). The WorkManager backup (#73–#77) now posts a "Backup finished" notification too. All the notification code is in `Notifications.kt`. These bugs cover the Android 12–14 changes that interviewers like to ask about: the notification permission, notification channels, `PendingIntent` flags, foreground service types, and exact alarms. The app targets SDK 36, and the messages below come from an API 37 emulator.
+
+Useful commands:
+- See the app's notifications: `adb shell dumpsys notification --noredact | grep -E "NotificationRecord.*brokencalc|AppSettings: com.interviewprep"`. The `AppSettings` line says `importance=NONE` when the app isn't allowed to post at all.
+- Grant or take away the notification permission: `adb shell pm grant com.interviewprep.brokencalc android.permission.POST_NOTIFICATIONS` (or `pm revoke`). To forget earlier "Don't allow" answers: `adb shell pm clear-permission-flags com.interviewprep.brokencalc android.permission.POST_NOTIFICATIONS user-set user-fixed`.
+- Exact alarm access: `adb shell appops get com.interviewprep.brokencalc SCHEDULE_EXACT_ALARM`, `appops set com.interviewprep.brokencalc SCHEDULE_EXACT_ALARM allow`, and `appops reset com.interviewprep.brokencalc` to undo.
+- Running services: `adb shell dumpsys activity services com.interviewprep.brokencalc`.
+- `adb shell pm clear com.interviewprep.brokencalc` also deletes the app's notification channels and resets the notification permission.
+
+> ⚠️ Export and Remind me live in Settings, so **fix #38 first**. #93 crashes Export straight away, so #94 and #95 only show up after it's fixed. #97 needs #73 fixed.
+
+- [ ] **93. "Export history" crashes the app** *(Android 14+)*
+  - Steps: run `adb logcat -s AndroidRuntime`. Open Settings and tap **Export history**.
+  - Expected: a progress notification appears and the CSV file is written.
+  - Actual: the app crashes with `SecurityException: Starting FGS with type dataSync callerApp=… targetSDK=36 requires permissions: all of the permissions [android.permission.FOREGROUND_SERVICE_DATA_SYNC]`, thrown by `startForeground` in `ExportService`. Android may retry the service when the app restarts, so sometimes you see the crash twice.
+  <details><summary>Hint</summary>Compare the <code>&lt;uses-permission&gt;</code> lines in the manifest with what the <code>&lt;service&gt;</code> declares. Since Android 14, every foreground service needs a <code>foregroundServiceType</code>, and every type needs its own permission on top of <code>FOREGROUND_SERVICE</code>. They're normal permissions, so there's no dialog, but nothing checks them until <code>startForeground</code> runs. Interview angles: which type fits a file export, and what changes for <code>dataSync</code> on Android 15 (a time limit)? Does this even need a foreground service, or would WorkManager (expedited work, or <code>setForeground</code>) be a better fit? What's a <code>shortService</code>?</details>
+
+- [ ] **94. Export never asks to show notifications, and none ever appear** *(Android 13+, you'll only see this after fixing #93)*
+  - Steps: start fresh with `adb shell pm clear com.interviewprep.brokencalc`. Open Settings, tap **Export history** and pull down the notification shade while it runs. Then run the `dumpsys notification` command above.
+  - Expected: the first time, the app says why it wants to notify you and asks "Allow Broken Calc to send you notifications?". Then an "Exporting history" progress bar shows, followed by "Export done". If you say no, the export still works.
+  - Actual: no dialog, and the shade says "You're all caught up". The export does run (`dumpsys activity services` shows `isForeground=true`), but `dumpsys notification` shows `AppSettings: com.interviewprep.brokencalc … importance=NONE`, so every notification is dropped without an error. After `pm grant … POST_NOTIFICATIONS`, the progress bar shows up. "Backup finished" and the reminder are silently dropped the same way.
+  <details><summary>Hint</summary><code>POST_NOTIFICATIONS</code> is declared in the manifest, but since Android 13 it's a <b>runtime</b> permission, like the camera. For apps that target 13+, the system never asks on your behalf. Look at <code>rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission())</code>, a <code>Build.VERSION.SDK_INT &gt;= 33</code> check, and <code>ContextCompat.checkSelfPermission</code>. Ask in context (when the user taps Export), not on app start. Then handle "no": after two refusals the dialog never shows again, so the button must not silently do nothing. Offer a link to the app's notification settings instead (<code>Settings.ACTION_APP_NOTIFICATION_SETTINGS</code>). Where does <code>shouldShowRequestPermissionRationale</code> fit in? And what did <code>@SuppressLint("MissingPermission")</code> in <code>Notifications.kt</code> hide?</details>
+
+- [ ] **95. The app crashes a few seconds after an export starts** *(you'll only see this after fixing #93)*
+  - Steps: run `adb logcat -s AndroidRuntime`. Open Settings, tap **Export history**, and wait about 4 seconds.
+  - Expected: an "Export done" notification that opens the app when you tap it.
+  - Actual: the file is written (`adb shell run-as com.interviewprep.brokencalc cat files/history_export.csv`), then the app crashes on a background thread with `IllegalArgumentException: com.interviewprep.brokencalc: Targeting S+ (version 31 and above) requires that one of FLAG_IMMUTABLE or FLAG_MUTABLE be specified when creating a PendingIntent.` The review reminder crashes the same way when it goes off (once #96 is fixed).
+  <details><summary>Hint</summary>Look at <code>Notifications.openAppIntent</code>. Since Android 12, every <code>PendingIntent</code> must say whether the app that fires it may change its <code>Intent</code>. Which flag fits "open my own screen", and when do you really need <code>FLAG_MUTABLE</code> (inline replies, bubbles)? Follow-up: every notification here uses request code <code>0</code> with <code>FLAG_UPDATE_CURRENT</code>. If each one carried different extras (say, "open this history entry"), what would tapping an older notification do? Also: why does an exception on a plain <code>thread { }</code> kill the whole app?</details>
+
+- [ ] **96. "Remind me" crashes the app, even though the permission is in the manifest** *(Android 14+)*
+  - Steps: run `adb logcat -s AndroidRuntime`. Open Settings and tap **Remind me**. Also run `adb shell appops get com.interviewprep.brokencalc SCHEDULE_EXACT_ALARM`.
+  - Expected: "OK, we'll remind you in 1 hour". If the app isn't allowed to set exact alarms, it says so and offers a way to allow it, or it uses a normal alarm. It never crashes.
+  - Actual: `SecurityException: Caller com.interviewprep.brokencalc needs to hold android.permission.SCHEDULE_EXACT_ALARM or android.permission.USE_EXACT_ALARM to set exact alarms.` After `appops set … SCHEDULE_EXACT_ALARM allow` it works, so remember to run `appops reset` afterwards.
+  <details><summary>Hint</summary><code>SCHEDULE_EXACT_ALARM</code> isn't a normal permission, and it doesn't have a dialog either. It's a special app access ("Alarms &amp; reminders") that the user turns on in system settings, and since Android 14 it's off by default for new installs. Check <code>AlarmManager.canScheduleExactAlarms()</code> before calling <code>setExact…</code>, and send the user to <code>Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM</code> if needed. The bigger interview question: does "remind me in about an hour" need an exact alarm at all? Compare <code>set()</code>, <code>setWindow()</code> and WorkManager, and know why <code>USE_EXACT_ALARM</code> is only for alarm clock and calendar apps. Bonus: what happens to this alarm when the phone reboots?</details>
+
+- [ ] **97. "Backup finished" never shows up unless you've used Export** *(you'll only see this after fixing #73)*
+  - Steps: run `adb shell pm clear com.interviewprep.brokencalc`, then grant the notification permission (see above, or fix #94). Plug the device in (see the WorkManager section). Run `adb logcat -s NotificationService`. Do a calculation, open Settings and tap **Back up now**. Then tap **Export history** once, and tap **Back up now** again.
+  - Expected: a "Backup finished" notification after both backups.
+  - Actual: the first backup says `SUCCEEDED` but no notification appears, and logcat shows `E NotificationService: No Channel found for pkg=com.interviewprep.brokencalc, channelId=calc_updates, id=3, …`. After one export, "Backup finished" works, until you clear the app's data or reinstall it.
+  <details><summary>Hint</summary>Find every call to <code>Notifications.createChannel</code>. Since Android 8, a notification posted to a channel that doesn't exist is dropped, and the only trace is that logcat line. Create your channels once, early (for example in <code>Application.onCreate</code>). Creating a channel that already exists is cheap and changes nothing. Follow-ups: once a channel exists, the user owns its importance and sound, so changing <code>IMPORTANCE_…</code> in code does nothing for people who already have the app. How would you ship a change like that? And why is one channel for progress bars, results, backups and reminders a bad idea for the user?</details>
+
+**Bad practices in this area**
+
+- [ ] `@SuppressLint("MissingPermission")` and `@SuppressLint("ScheduleExactAlarm")` silence lint instead of handling the missing permission.
+- [ ] One notification channel for everything, and hard-coded channel names, notification texts and IDs instead of `strings.xml` and named constants.
+- [ ] The service works on a raw `thread { }` with `Thread.sleep`. Nothing can cancel it, `onDestroy` doesn't stop it, and the notification has no Cancel action.
+- [ ] The CSV is built with `replace(" = ", ",")` and no quoting, so a result like `1,000` (#21) splits into extra columns. The file is also reopened for every row with `appendText`.
+- [ ] The service reads the global `HistoryManager.items`, and the composable starts the service directly instead of going through a ViewModel.
+- [ ] The reminder uses wall-clock time (`RTC_WAKEUP` with `System.currentTimeMillis()`), is lost after a reboot, and can't be cancelled.
+
+**Stretch goals**
+
+- [ ] Rewrite the export as a `CoroutineWorker` with `setForeground`, and compare it with the service: who handles process death, retries and constraints?
+- [ ] Add a Cancel action to the progress notification, and make "Export done" share the file with `FileProvider` and `Intent.ACTION_SEND`.
+- [ ] Make tapping "Backup finished" or the reminder open the History screen, with a `PendingIntent` per destination.
 
 ## Adaptive UI
 
