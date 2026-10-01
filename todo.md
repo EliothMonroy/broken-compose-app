@@ -229,7 +229,7 @@ These cover what interviewers usually ask about: scopes, cancellation, dispatche
   <details><summary>Hint</summary><code>catch (e: Exception)</code> also catches <code>CancellationException</code>. The loop never ends, and once the job is cancelled <code>delay()</code> throws straight away, so it spins on a <code>Dispatchers.Default</code> thread forever. Each trip adds another spinning thread until the default pool (one thread per CPU core) is full, and then <code>GlobalScope.launch</code> work for <code>=</code> never gets a thread. Rethrow <code>CancellationException</code>, or catch only what you mean to, and use <code>while (isActive)</code>. Why is <code>withContext(Dispatchers.Default)</code> pointless for a timer?</details>
 
 - [ ] **32. Clear history freezes the UI, and the "Saving…" indicator never shows**
-  - Steps: History → Clear history. Watch the ripple, or run `adb logcat | grep Choreographer`.
+  - Steps: start `adb logcat -s Choreographer` **before** you tap. (#31 floods logcat once you leave the calculator, so reading the log afterwards with `adb logcat -d` usually misses the line.) Then History → Clear history, and watch the ripple.
   - Expected: the UI stays responsive and "Saving…" shows while the write happens.
   - Actual: the app freezes for about 0.8 s (`Skipped 47 frames!`), and "Saving…" never appears.
   <details><summary>Hint</summary><code>runBlocking</code> on the main thread blocks it. <code>isSaving</code> goes <code>true</code> and back to <code>false</code> before a frame can be drawn. Use a scope tied to a lifecycle, and move the disk write to <code>Dispatchers.IO</code> with <code>withContext</code>. Why was <code>delay(800)</code> never the right fix for "nothing gets lost"?</details>
@@ -249,7 +249,7 @@ These cover what interviewers usually ask about: scopes, cancellation, dispatche
 - [ ] **35. History stats never settle: "Calculating stats…" keeps coming back**
   - Steps: open History and watch the stats line for a few seconds.
   - Expected: it's computed once, then only again when the history changes.
-  - Actual: it cycles between "Calculating stats…" and the result forever, recomputing all the time.
+  - Actual: it almost always says "Calculating stats…" (11 of 12 samples in a row on the emulator). The result only flashes for a moment before the next round starts, and it keeps recomputing forever.
   <details><summary>Hint</summary><code>scope.launch</code> is called directly in the <code>HistoryStats</code> composable body. Every write to <code>stats</code> causes a recomposition, which starts another coroutine. Side effects belong in <code>LaunchedEffect(key)</code> or in event callbacks, and <code>rememberCoroutineScope</code> is for events such as clicks.</details>
 
 - [ ] **36. Opening History crashes even though the stats code has a `try/catch`** *(reproduce this before fixing #21)*
