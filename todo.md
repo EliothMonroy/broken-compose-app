@@ -26,6 +26,18 @@ A few bugs block or disturb others. Fix them early, or keep them in mind:
 - Some sections have a bug that hides the rest of that section: #58 (converter), #88 (search) and #93 (Export). Each section says so at the top.
 - **The app remembers things between launches:** history, memory, constants, settings, and the app language. If a step gives a different number than the one written here, press `MC` and `C`, or start clean with `adb shell pm clear com.interviewprep.brokencalc`. That also resets the app language and the notification permission.
 
+**Reproduce these before you fix the bug they depend on**
+
+Working through the list in order mostly works, but a few fixes remove the thing a *later* bug needs in order to show up. Reproduce the later bugs first (or take notes), then fix:
+
+- **#9 (dividing by zero):** #37 and #90 need an `Infinity` result, and #54's test only looks wrong while `5 ÷ 0` still gives one. History entries you create now stay around after the fix.
+- **#21 (results of 1,000 or more):** #22, #36 and the crash part of #48 need a result shown as `1,000`. Fix #36 **before** #21, then look at #22 and #48 while big results still have commas.
+- **#14 (right-to-left subtraction):** #56's test only looks wrong while the app still shows `7` for `10 − 5 − 2`.
+- **#29 (stale preview):** a good fix (`viewModelScope`) may also make #55's test pass. Reproduce #55 first.
+- **#35 (stats never settle):** fix it before you time #34, otherwise the stats line hardly ever shows a result.
+
+If a fix has already hidden a later bug, you can still study it: read the code, or put the earlier bug back for a moment (`git stash` is handy), reproduce, and restore.
+
 To rotate an emulator that has auto-rotate turned off, run `adb shell settings put system user_rotation 1`, and `user_rotation 0` to go back.
 
 ---
@@ -62,13 +74,13 @@ To rotate an emulator that has auto-rotate turned off, run `adb shell settings p
   - Actual: `7`.
   <details><summary>Hint</summary>Copy-paste bug.</details>
 
-- [ ] **6. The "Decimal places" setting does nothing**
+- [ ] **6. The "Decimal places" setting does nothing** *(needs #38 fixed first)*
   - Steps: Settings → set decimal places to 2 → back to Calc → `1`, `÷`, `3`, `=`.
   - Expected: `0.33`.
   - Actual: `0.3333333333333333`.
   <details><summary>Hint</summary>Compare the SharedPreferences key the setting is <b>written</b> with to the key <code>Calculator.format</code> <b>reads</b>. How do you stop this class of bug for good?</details>
 
-- [ ] **7. In dark mode the display text can't be read**
+- [ ] **7. In dark mode the display text can't be read** *(needs #38 fixed first)*
   - Steps: Settings → enable Dark mode → restart the app (see #18).
   - Expected: light text on a dark background.
   - Actual: the display number is black on a near-black background.
@@ -119,12 +131,12 @@ To rotate an emulator that has auto-rotate turned off, run `adb shell settings p
   <details><summary>Hint</summary><code>parseExpression</code> and <code>parseTerm</code> recurse on the right-hand side, which makes operators right-associative. Use a loop instead.</details>
 
 - [ ] **15. Floating-point errors show up in results**
-  - Steps: `0`, `.`, `1`, `+`, `0`, `.`, `2`, `=`. This is easiest to see before fixing #6.
-  - Expected: `0.3`.
-  - Actual: `0.30000000000000004`.
+  - Steps: `0`, `.`, `1`, `+`, `0`, `.`, `2`, `=`. Then `1000000.1 + 0.2 =`.
+  - Expected: `0.3` and `1000000.3`.
+  - Actual: `0.30000000000000004` and `1000000.2999999999`. Once #6 is fixed, the first one is rounded to `0.3` and looks fine, but the second one still shows the problem.
   <details><summary>Hint</summary>Rounding when displaying hides it. <code>BigDecimal</code> fixes it. Be ready to explain why in an interview.</details>
 
-- [ ] **16. With 0 decimal places, numbers ending in 0 lose digits** *(you'll only see this after fixing #6)*
+- [ ] **16. With 0 decimal places, numbers ending in 0 lose digits** *(you'll only see this after fixing #6, which needs #38)*
   - Steps: Settings → decimal places 0 → `1`, `0`, `.`, `4`, `=`.
   - Expected: `10`.
   - Actual: `1`.
@@ -136,7 +148,7 @@ To rotate an emulator that has auto-rotate turned off, run `adb shell settings p
   - Actual: the end of the number is clipped, so you can't see what you're typing.
   <details><summary>Hint</summary>Fixed <code>56.sp</code>, <code>softWrap = false</code>, <code>TextOverflow.Clip</code>. Look into auto-sizing text or a horizontal scroll pinned to the end.</details>
 
-- [ ] **18. The dark mode toggle only takes effect after a restart or rotation**
+- [ ] **18. The dark mode toggle only takes effect after a restart or rotation** *(needs #38 fixed first)*
   - Steps: Settings → toggle Dark mode.
   - Expected: the theme changes right away.
   - Actual: nothing changes until the Activity is recreated.
@@ -162,7 +174,7 @@ To rotate an emulator that has auto-rotate turned off, run `adb shell settings p
   - Actual: `1`.
   <details><summary>Hint</summary>There are three problems here. (a) <code>format</code> adds grouping separators that end up back in the input. (b) The tokenizer treats <code>,</code> as a separator between two numbers. (c) The parser never checks that it used up every token, so trailing tokens are silently dropped. <code>2(3)</code> and <code>5)</code> show (c) too. Bonus: <code>String.format</code> without a <code>Locale</code> behaves differently in, say, <code>de_DE</code>.</details>
 
-- [ ] **22. History is corrupted after restarting the app**
+- [ ] **22. History is corrupted after restarting the app** *(reproduce this before fixing #21)*
   - Steps: calculate `999+1` so the result is `1,000`, then force-stop and reopen the app. Look at the History button in the top bar.
   - Expected: `History (1)`, with one entry, `999+1 = 1,000`.
   - Actual: `History (2)`. Opening History crashes because of #36, so fix that one first to see the list: it has two entries, `999+1 = 1` and `000`, and tapping `000` crashes the app.
@@ -240,8 +252,8 @@ These cover what interviewers usually ask about: scopes, cancellation, dispatche
   - Actual: the number keeps growing (1 → 7 → 13 …).
   <details><summary>Hint</summary>Two problems. <code>awaitClose { }</code> doesn't unregister the listener. And <code>HistoryManager.changes()</code> creates a <b>new</b> <code>Flow</code> on every recomposition, so <code>collectAsState</code> restarts the collection each time. Remove the listener in <code>awaitClose</code>, and expose one shared flow (for example <code>stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), …)</code>), or <code>remember</code> it. Bonus: <code>listeners</code> is an <code>ArrayList</code> changed on the main thread and iterated on a background thread.</details>
 
-- [ ] **34. History stats take about 1.5 s to load when they should take about 0.5 s**
-  - Steps: do a calculation, then open History and time the "Calculating stats…" text.
+- [ ] **34. History stats take about 1.5 s to load when they should take about 0.5 s** *(easiest to see after fixing #35)*
+  - Steps: do a calculation, then open History and time the "Calculating stats…" text. While #35 is still there, the stats keep restarting and the result only flashes, so fix #35 first.
   - Expected: roughly the time of one `slowStat` call (about 500 ms), because the three stats are independent.
   - Actual: about 1.5 s. They run one after another.
   <details><summary>Hint</summary><code>async { … }.await()</code> on the same line is just sequential code with extra steps. Start all three, then <code>await</code> them, or use <code>awaitAll</code>. Also, is <code>Dispatchers.IO</code> the right dispatcher for CPU work?</details>
@@ -252,13 +264,13 @@ These cover what interviewers usually ask about: scopes, cancellation, dispatche
   - Actual: it almost always says "Calculating stats…" (11 of 12 samples in a row on the emulator). The result only flashes for a moment before the next round starts, and it keeps recomputing forever.
   <details><summary>Hint</summary><code>scope.launch</code> is called directly in the <code>HistoryStats</code> composable body. Every write to <code>stats</code> causes a recomposition, which starts another coroutine. Side effects belong in <code>LaunchedEffect(key)</code> or in event callbacks, and <code>rememberCoroutineScope</code> is for events such as clicks.</details>
 
-- [ ] **36. Opening History crashes even though the stats code has a `try/catch`** *(reproduce this before fixing #21)*
+- [ ] **36. Opening History crashes even though the stats code has a `try/catch`** *(reproduce and fix this before fixing #21)*
   - Steps: `9`, `9`, `9`, `+`, `1`, `=` (result `1,000`), then open History.
   - Expected: the stats line shows "Stats unavailable", which is what the `catch` is for, and the app keeps working.
   - Actual: the app crashes with `NumberFormatException: For input string: "1,000"`.
   <details><summary>Hint</summary>An exception inside a child <code>async</code> cancels its <b>parent</b> straight away. That happens whether or not someone calls <code>await()</code>, so a <code>try/catch</code> around <code>await()</code> can't stop it. Handle the error inside the <code>async</code> block, or wrap the children in <code>supervisorScope { }</code>, and know why each works. This is a very common interview question: "what's the difference between exceptions in <code>launch</code> and in <code>async</code>?"</details>
 
-- [ ] **37. After one failed background save, nothing is ever saved again**
+- [ ] **37. After one failed background save, nothing is ever saved again** *(reproduce this before fixing #9)*
   - Steps: `5`, `÷`, `0`, `=` (result `Infinity`), then `M+`. Then do `2`, `+`, `2`, `=`. Force-stop and reopen the app.
   - Expected: the Infinity memory write is rejected, but `2+2 = 4` is still saved to history.
   - Actual: `2+2 = 4` is gone after the restart, and so is every later calculation. Logcat shows a single `AppScope: Background work failed … Can't save Infinity to memory`.
@@ -277,7 +289,7 @@ The app is only partly moved to Hilt. `CalcApp` is annotated `@HiltAndroidApp`, 
   <details><summary>Hint</summary><code>hiltViewModel()</code> needs the hosting Activity to be part of Hilt's component tree. Which annotation is missing, and why does this fail at runtime instead of at compile time?</details>
 
 - [ ] **39. "This session" in Settings always says 0 calculations and 0 errors**
-  - Steps: do a calculation and trigger an error (`5`, `+`, `÷`, `2`, `=`), then open Settings.
+  - Steps: do a calculation and trigger an error with `(`, `)`, `=` (the display shows `Error`), then open Settings.
   - Expected: `This session: 1 calculations, 1 errors`.
   - Actual: `This session: 0 calculations, 0 errors`.
   <details><summary>Hint</summary><code>SessionTracker</code> is annotated <code>@Singleton</code>, so why isn't it one? Look at <code>AppModule</code>: an explicit <code>@Provides</code> takes priority over the <code>@Inject constructor</code>, and that <code>@Provides</code> has no scope. Every injection and every <code>appEntryPoint().sessionTracker()</code> call gets a new instance. The fix can be deleting code. Follow-up questions: what does "scoped" actually mean in Dagger, and what's the difference between <code>Provider&lt;T&gt;</code> and <code>Lazy&lt;T&gt;</code>?</details>
@@ -420,22 +432,22 @@ Run the JVM unit tests with `./gradlew testDebugUnitTest` (report: `app/build/re
   - Actual: both tests fail with `kotlin.UninitializedPropertyAccessException: lateinit property prefs has not been initialized`. The fix should let `Calculator.format` run in a plain JVM test with no Activity, and let the test choose the number of decimal places.
   <details><summary>Hint</summary>Follow the stack trace into <code>Calculator.format</code>. What does it read, and who sets that? A function that reaches into a static <code>lateinit</code> has a hidden input the test can't see or control. Make the input explicit, for example a parameter. Resist "fixing" the test by assigning <code>MainActivity.prefs</code> a fake: that global then leaks into every other test in the same JVM. Interview angle: "what makes code hard to unit test?"</details>
 
-- [ ] **54. `divideByZeroIsAnError` passes even though `5 ÷ 0` gives `Infinity`**
+- [ ] **54. `divideByZeroIsAnError` passes even though `5 ÷ 0` gives `Infinity`** *(reproduce this before fixing #9)*
   - Steps: `./gradlew testDebugUnitTest --tests "*CalculatorTest.divideByZeroIsAnError*"`. Then press `5`, `÷`, `0`, `=` in the app (#9).
   - Expected: the test fails until #9 is fixed, with the message `5÷0 should not give a number`.
-  - Actual: the test passes, although the app is broken. The fix should make the test fail today and pass only once dividing by zero is really an error.
+  - Actual: the test passes, although the app is broken. The fix should make the test fail today and pass only once dividing by zero is really an error. If you already fixed #9, put the old behaviour back for a moment: the test should fail, and right now it doesn't.
   <details><summary>Hint</summary>What does <code>fail()</code> actually do to stop a test? And what is the <code>catch</code> block catching? A test that can't fail is worse than no test, because it gives you false confidence. Check that a test fails at least once before you trust it. Look at <code>assertThrows</code>, and think about which exact exception #9's fix should throw.</details>
 
-- [ ] **55. `previewShowsResultWhileTyping` fails even though the test "skips" the delay**
+- [ ] **55. `previewShowsResultWhileTyping` fails even though the test "skips" the delay** *(reproduce this before fixing #29)*
   - Steps: `./gradlew testDebugUnitTest --tests "*CalculatorViewModelTest*"`.
   - Expected: after `2`, `+`, `3` and `advanceUntilIdle()`, `vm.preview` is `"5"`.
   - Actual: `org.junit.ComparisonFailure: expected:<[5]> but was:<[]>`. It still fails after you fix #53. The fix should make the test control the preview coroutine, so it passes right away with no real waiting and no `Thread.sleep`.
   <details><summary>Hint</summary>The test sets <code>Dispatchers.setMain</code> and uses <code>runTest</code>, so it looks right. But which scope and dispatcher does <code>updatePreview()</code> actually launch on? Virtual time only controls coroutines that run on the test's scheduler. The ViewModel has to let the test in, for example with <code>viewModelScope</code> or an injected dispatcher. Interview angle: "how do you test code that uses <code>delay</code>?" A common follow-up is a reusable <code>MainDispatcherRule</code>.</details>
 
-- [ ] **56. `tenMinusFiveMinusTwoIsThree` passes even though the app shows `7`**
+- [ ] **56. `tenMinusFiveMinusTwoIsThree` passes even though the app shows `7`** *(reproduce this before fixing #14)*
   - Steps: `./gradlew connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.interviewprep.brokencalc.CalculatorScreenTest`. Then do `10 − 5 − 2 =` by hand (#14).
   - Expected: the test fails until #14 is fixed.
-  - Actual: both UI tests pass, although the app is broken. The fix should check the number on the **display**, and should wait until the result has arrived.
+  - Actual: both UI tests pass, although the app is broken. The fix should check the number on the **display**, and should wait until the result has arrived. If you already fixed #14, the test is now "right" by luck: put the bug back for a moment and see that it still passes.
   <details><summary>Hint</summary>Which node does <code>onNodeWithText("3")</code> find? Look at the screen: how many things say "3"? Once the finder is fixed, try it again: what does the display show at the moment of the check? <code>waitForIdle()</code> only waits for Compose and Espresso. It knows nothing about a <code>GlobalScope</code> coroutine with a <code>delay</code>. Look at <code>Modifier.testTag</code>, <code>onNodeWithTag</code>, <code>waitUntil</code>, and idling resources.</details>
 
 - [ ] **57. The Hilt test can't start: "cannot use a @HiltAndroidApp application"**
@@ -811,7 +823,7 @@ The History list now has a **search field**, filter chips (**All**, **No errors*
   - Actual: you may see `1 match` for a split second, then it switches to `3 matches · sum 223`. Those are the results for `1`, and they stay, even though the field says `15`. Logcat shows both searches started.
   <details><summary>Hint</summary>The search for `1` is slower than the search for `15`, so it finishes last. Which operator turns each query into a search? <code>flatMapMerge</code> runs them all at the same time and passes on every result in the order they finish. Compare it with <code>flatMapConcat</code> and <code>flatMapLatest</code>, and explain which one cancels the old search. Does <code>debounce</code> fix this on its own? What if the user just types slowly?</details>
 
-- [ ] **90. After one search that includes `Infinity`, search says "No matches" forever**
+- [ ] **90. After one search that includes `Infinity`, search says "No matches" forever** *(needs an `Infinity` entry in History, so do `5÷0=` before fixing #9)*
   - Steps: do `5÷0=` (result `Infinity`) and a few other calculations. Open History, tap **All**, then search for `5`. Now tap **No errors**, or change the query to `57`, or to anything else.
   - Expected: `5` shows its matches (or at least a clear error), and **No errors** leaves out the `Infinity` row, so the search works again.
   - Actual: `5` says "No matches". After that every query and every chip also says "No matches", and logcat shows no new searches. Logcat has one `W/HistorySearch: search error, showing no results` with a `NumberFormatException` from `BigDecimal`. Search only comes back after you leave History and return, or rotate the device.
@@ -938,9 +950,9 @@ Useful commands:
   <details><summary>Hint</summary>Look at the <code>BackHandler</code> in <code>HistoryPane</code>. Which <code>enabled</code> value does it use when you don't pass one? An enabled callback tells the system "I'll handle Back" <b>before</b> the gesture starts. That's why the system can't play the back-to-home animation, and why a callback that does nothing traps the user. <code>enabled</code> should follow your state, for example <code>enabled = selected != null</code>. Interview angles: why predictive back needs to know in advance who handles Back, and how <code>PredictiveBackHandler</code> lets you animate the card away while the user is still swiping.</details>
 
 - [ ] **102. A hardware keyboard types every key twice**
-  - Steps: with the emulator focused, type `1` then `2` on your keyboard (or use `adb shell input keyevent`). Then tap `C` and `8` on the screen and press Backspace on the keyboard. Also try typing `7` and then `=`.
-  - Expected: the display shows `12`. Backspace removes the `8`. `7` `=` adds one History entry.
-  - Actual: the display shows `1122`. Backspace removes the `8`, then the app crashes with `StringIndexOutOfBoundsException` (that's #1, triggered by a second Backspace nobody pressed). `7` `=` shows `77` and adds `77 = 77` to History twice.
+  - Steps: with the emulator focused, type `1` then `2` on your keyboard (or use `adb shell input keyevent`). Then tap `C`, `8`, `9` on the screen and press Backspace on the keyboard. Also try typing `7` and then `=`.
+  - Expected: the display shows `12`. Backspace leaves `8`. `7` `=` adds one History entry.
+  - Actual: the display shows `1122`. Backspace removes both digits. `7` `=` shows `77` and adds `77 = 77` to History twice. (Until #1 is fixed, Backspace on a single digit even crashes the app, because the second Backspace nobody pressed hits an empty display.)
   <details><summary>Hint</summary>Log every <code>KeyEvent</code> the listener in <code>HardwareKeyboard.kt</code> gets. How many events does one key press send? Look at <code>event.action</code> (<code>ACTION_DOWN</code> and <code>ACTION_UP</code>) and at <code>repeatCount</code> for a key that's held down. In Compose you'd normally use <code>Modifier.onKeyEvent</code> or <code>onPreviewKeyEvent</code> and check <code>KeyEventType.KeyDown</code>. Then you need a focused node, so think about what happens to focus when the user taps the screen (touch mode). Follow-ups: <code>Shift</code>+<code>8</code> should type <code>×</code> on a US keyboard, so how would you read modifiers or the typed character? How would you add <code>Ctrl</code>+<code>C</code> to copy the result?</details>
 
 **Bad practices in this area**
