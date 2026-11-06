@@ -4,7 +4,7 @@
 
 **Broken Calc** is a Jetpack Compose calculator built for **Android interview practice**. It is *intentionally* buggy and *intentionally* written with bad Android/Kotlin/Compose practices. The user fixes these problems themselves to practise debugging, refactoring and explaining their reasoning.
 
-`todo.md` is the source of truth for the planted bugs (numbered 1–102), the bad-practice checklist, and stretch goals. `README.md` is the short introduction for people.
+`todo.md` is the source of truth for the planted bugs (numbered 1–105), the bad-practice checklist, and stretch goals. `README.md` is the short introduction for people.
 
 ## Rules for AI agents
 
@@ -24,7 +24,7 @@
 - Kotlin 2.2, Jetpack Compose (Material 3, BOM `2025.09.00`), single Activity
 - AGP 8.13, Gradle 8.14 (wrapper included), JDK 17+
 - `minSdk 24`, `targetSdk`/`compileSdk 36`
-- Persistence: `SharedPreferences` (`calc_prefs`) for history, memory and settings; a Room database for Constants; a few plain files in `filesDir` (backup, export, input log)
+- Persistence: `SharedPreferences` (`calc_prefs`) for history, memory and settings; a Room database for Constants; a few plain files in `filesDir` (backup, export, input log, `history.txt`)
 - DI: Hilt 2.57 with KSP, only partly adopted on purpose (see bugs #38–#42)
 - More libraries are declared in `app/build.gradle.kts` for the newer bug categories: Room, Navigation Compose, Retrofit/OkHttp with kotlinx.serialization, WorkManager with hilt-work, Material 3 adaptive / window-size-class and Jetpack WindowManager, and test libraries. Each one is used by its own section in `todo.md`.
 
@@ -55,7 +55,7 @@ Everything is in one flat package on purpose. The groups below are only for read
 ```
 app/src/main/java/com/interviewprep/brokencalc/
 │  App shell
-├── CalcApp.kt              # @HiltAndroidApp Application; WorkManager Configuration.Provider, daily backup
+├── CalcApp.kt              # @HiltAndroidApp Application; WorkManager Configuration.Provider, daily backup, starts Analytics
 ├── MainActivity.kt         # entry point; static Activity/prefs refs; loads history/memory; usage timer, startup tasks; onBackPressed
 ├── App.kt                  # string-based "navigation", top bar ($ converter button, History badge)
 ├── TwoPane.kt              # AdaptiveCalculator: tablet two-pane layout (adaptive bugs #98–#102)
@@ -77,6 +77,7 @@ app/src/main/java/com/interviewprep/brokencalc/
 ├── UsageTimer.kt           # "Active time" ticker
 ├── LcdTexture.kt           # display background bitmap (performance bugs #68–#72)
 ├── InputLog.kt             # per-keystroke input log file
+├── Analytics.kt            # keypress analytics: MutableStateFlow + appScope collector (bug #105)
 ├── Startup.kt              # startup "warm-up" + debug StrictMode
 ├── Accessibility.kt        # display semantics, keypad text size (a11y/i18n bugs #78–#82)
 ├── TipSplitViewModel.kt    # Tip & split UiState + events (UI state bugs #83–#87)
@@ -86,12 +87,14 @@ app/src/main/java/com/interviewprep/brokencalc/
 ├── HistoryNav.kt           # Navigation Compose NavHost: list → detail (bugs #48–#52)
 ├── ScrollToTop.kt          # "↑ Top" button in History
 ├── HistorySearch.kt        # search + filter chips, Flow pipeline (Flow bugs #88–#92)
+├── SaveAsText.kt           # "Save as text" button, TextSaver writing history.txt (bug #104)
 ├── BackupWorker.kt         # @HiltWorker history backup, BackupStore, BackupScheduler (bugs #73–#77)
 │  Settings and DI
-├── SettingsScreen.kt       # dark mode, haptics, decimal places, session stats, backup + export sections
+├── SettingsScreen.kt       # dark mode, haptics, decimal places, session stats, backup, export + reset sections
 ├── SettingsViewModel.kt    # @HiltViewModel for Settings
 ├── BackupSection.kt        # "Back up now" button + status
 ├── ExportSection.kt        # "Export history" + "Remind me" buttons (permissions bugs #93–#97)
+├── AppReset.kt             # "Reset app data" section, AppReset.wipeSavedData (bug #103)
 ├── ExportService.kt        # dataSync foreground service writing history_export.csv
 ├── Notifications.kt        # channel, progress/done/backup notifications, PendingIntents
 ├── ReviewReminder.kt       # exact alarm + ReminderReceiver

@@ -1,6 +1,6 @@
 # Broken Calc
 
-A Jetpack Compose calculator for Android that is **broken on purpose**. It has 102 planted bugs and is written with bad practices throughout, so you can practise the debugging and refactoring you'd be asked to do in an Android interview.
+A Jetpack Compose calculator for Android that is **broken on purpose**. It has 105 planted bugs and is written with bad practices throughout, so you can practise the debugging and refactoring you'd be asked to do in an Android interview.
 
 > ⚠️ Don't copy code from this repo into a real app. Almost everything odd in it is deliberate.
 
@@ -30,6 +30,7 @@ A Jetpack Compose calculator for Android that is **broken on purpose**. It has 1
 | Flow operators | #88–#92 |
 | Permissions, notifications and foreground services | #93–#97 |
 | Adaptive UI | #98–#102 |
+| Jobs and hot flows (`join`, `cancelAndJoin`, `StateFlow` vs `SharedFlow`) | #103–#105 |
 
 `todo.md` also has a list of bad practices to refactor and some stretch goals.
 

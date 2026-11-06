@@ -114,6 +114,7 @@ fun HistoryList(navController: NavController) {
         }
 
         HistoryStats()
+        SaveAsTextButton()
         HistorySearch()
 
         if (items.size == 0) {
