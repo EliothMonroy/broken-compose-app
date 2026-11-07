@@ -1004,6 +1004,26 @@ Three small features that all run on `appScope`. Settings has a **Reset** sectio
 
 - [ ] Send analytics in batches: buffer events in a `Channel` and upload 10 at a time, or every 5 seconds, whichever comes first.
 
+## Build setup
+
+This one isn't a bug: the app works the same before and after. But "how do you manage dependencies in a multi-module project?" is a common interview question, and this build is a good example of what goes wrong without a plan. There's no `gradle/libs.versions.toml`. `app/build.gradle.kts` has 37 dependencies with a hard-coded version, and the root `build.gradle.kts` has 7 plugins, each with its own version. Many versions are copied by hand: Room `2.7.2` and Hilt `2.57.1` each appear five times across the two files and lifecycle `2.9.2` four times, Kotlin `2.2.10` is in three plugins and inside the KSP version, and the Compose BOM version is written twice.
+
+Follow Android's guide, [Migrate your build to version catalogs](https://developer.android.com/build/migrate-to-catalogs).
+
+- [ ] **Migrate the build to a version catalog**
+  - Steps:
+    1. Before you change anything, save what Gradle resolves today: `./gradlew -q :app:dependencies > deps-before.txt` and `./gradlew -q buildEnvironment > plugins-before.txt`. (`-q` leaves out the "BUILD SUCCESSFUL in 3s" line, which would otherwise show up in the diff.)
+    2. Create `gradle/libs.versions.toml` with `[versions]`, `[libraries]` and `[plugins]`.
+    3. In the root `build.gradle.kts`, use `alias(libs.plugins.…) apply false`. In `app/build.gradle.kts`, use `alias(libs.plugins.…)` and `libs.…` for every dependency.
+    4. Run the two commands again into `deps-after.txt` and `plugins-after.txt`, and `diff` them against the "before" files.
+  - Done when: no version string is left in either `build.gradle.kts`, `./gradlew assembleDebug` passes, and both diffs are empty. The unit tests and lint still fail exactly as before.
+  <details><summary>Hint</summary>The diff is the point: a migration that quietly bumps or drops a version is the most common mistake, and the build will still pass. Watch these spots. The Compose BOM goes in the catalog once, as <code>platform(libs.…)</code>, and the libraries it manages get <b>no</b> version, so don't invent one. Give each family that is released together one shared version (<code>room</code>, <code>hilt</code>, <code>lifecycle</code>, <code>okhttp</code>, <code>retrofit</code>), and reuse <code>hilt</code> for the Hilt plugin and <code>room</code> for the Room plugin. But don't share a version just because the numbers match today: <code>navigation-compose</code> is <code>2.9.3</code>, not lifecycle's <code>2.9.2</code>. The KSP version (<code>2.2.10-2.0.2</code>) contains the Kotlin version but can't reference it, so it's its own entry. Remember it when you bump Kotlin. Interview follow-ups: catalog vs <code>buildSrc</code> vs convention plugins (<code>build-logic</code>), and how they work together. When is a <code>[bundles]</code> entry worth it? Why can a catalog change rebuild less than a <code>buildSrc</code> change? How do Dependabot and Renovate update a catalog? Should <code>compileSdk</code> and <code>minSdk</code> live in the catalog too?</details>
+
+**Stretch goals**
+
+- [ ] Move the shared Android setup (`compileSdk`, `minSdk`, Java/Kotlin targets, Compose) into a convention plugin in an included `build-logic` build, so a second module would only need one `plugins { }` line.
+- [ ] Add a Dependabot or Renovate config that understands `libs.versions.toml`, and decide which updates should be grouped (for example Kotlin, KSP and the Compose compiler plugin).
+
 ---
 
 ## Bad practices to refactor
@@ -1040,7 +1060,7 @@ These aren't user-visible bugs, but an interviewer will notice them. Being able 
 - [ ] No `@Preview`s.
 - [ ] Very few tests, and some of them are broken (see the Testing section). Most of the app has no tests at all.
 - [ ] Nobody runs lint. `./gradlew lintDebug` fails with 6 errors and about 55 warnings, and most of those errors point straight at bugs in this list. Reading the lint report (`app/build/reports/lint-results-debug.html`) is a fair first move in an interview. Make it part of the build or CI once it's clean.
-- [ ] No version catalog (`libs.versions.toml`). Versions are hard-coded in the Gradle files.
+- [ ] No version catalog (`libs.versions.toml`). Versions are hard-coded in the Gradle files. The **Build setup** section turns this into an exercise.
 - [ ] Manifest uses a platform `android:style` theme and the default system icon. `allowBackup="true"` with no backup rules.
 
 ## Stretch goals
