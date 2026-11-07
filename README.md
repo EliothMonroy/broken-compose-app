@@ -32,7 +32,7 @@ A Jetpack Compose calculator for Android that is **broken on purpose**. It has 1
 | Adaptive UI | #98–#102 |
 | Jobs and hot flows (`join`, `cancelAndJoin`, `StateFlow` vs `SharedFlow`) | #103–#105 |
 
-`todo.md` also has a list of bad practices to refactor and some stretch goals.
+`todo.md` also has a build exercise (migrating to a version catalog), a list of bad practices to refactor, and some stretch goals.
 
 ## Build and run
 
