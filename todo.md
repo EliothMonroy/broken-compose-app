@@ -768,7 +768,7 @@ Run `adb logcat -s TipSplit` while you test. It logs when the ViewModel sends an
   - Steps: run `adb logcat -s TipSplit`. Press `C` so the display shows `0`, then long-press `%`.
   - Expected: a "Type the bill on the calculator first" toast, and the dialog closes.
   - Actual: the dialog stays open with `Bill: $0.00`, and Calculate happily gives `$0.00 each`. Logcat shows `No bill to split` from the ViewModel, but never `Got event`.
-  <details><summary>Hint</summary>Look at how <code>_events</code> is created, and compare <b>when</b> <code>start()</code> emits with when the dialog starts collecting. A <code>MutableSharedFlow()</code> with no replay and no buffer simply drops a value if nobody is collecting at that moment. Both <code>LaunchedEffect</code>s start in the same frame, in the order they're written. Swapping them makes it work, but why is that a fragile fix? Compare <code>Channel(Channel.BUFFERED).receiveAsFlow()</code>, <code>MutableSharedFlow(replay = …)</code> or <code>extraBufferCapacity</code>, and putting the message in state. Follow-ups: what's the difference between <code>emit</code> and <code>tryEmit</code> here? Can a <code>Channel</code> event still get lost, for example when the collector is cancelled right after receiving it?</details>
+  <details><summary>Hint</summary>Look at how <code>_events</code> is created, and compare <b>when</b> <code>start()</code> emits with when the dialog starts collecting. A <code>MutableSharedFlow()</code> with no replay and no buffer simply drops a value if nobody is collecting at that moment. Both <code>LaunchedEffect</code>s start in the same frame, in the order they're written. Swapping them makes it work, but why is that a fragile fix? Compare <code>Channel(Channel.BUFFERED).receiveAsFlow()</code>, <code>MutableSharedFlow(replay = …)</code> or <code>extraBufferCapacity</code>, and putting the message in state. Follow-up: can a <code>Channel</code> event still get lost, for example when the collector is cancelled right after receiving it? (#105 goes deeper into <code>emit</code> vs <code>tryEmit</code> and buffers.)</details>
 
 - [ ] **85. The error, the spinner and an old result all show at the same time**
   - Steps: type `50`, long-press `%`. Without adding anyone, tap **Calculate**. You get "Add at least one person". Now add `Ana` and tap **Calculate** again, then once more.
@@ -998,12 +998,10 @@ Three small features that all run on `appScope`. Settings has a **Reset** sectio
 
 - [ ] `wipeSavedData` returns a `Job` instead of being a `suspend` function, and the UI does storage work directly in an `onClick`.
 - [ ] `TextSaver` keeps a global `var job`, calls `Thread.sleep` inside a coroutine, opens the file again for every line, and reads `HistoryManager.items` from a background thread while the main thread can change it.
-- [ ] `Analytics` is a global object with a collector that runs forever in `appScope`, and its `sent` counter is changed from background threads with no synchronization.
-- [ ] File names are repeated as string literals in several files (`"history.txt"`, `"input_log.txt"`).
+- [ ] `Analytics` is a global object, and its `sent` counter is changed from background threads with no synchronization.
 
 **Stretch goals**
 
-- [ ] Inject a dispatcher into `TextSaver` and write a `runTest` test that starts two saves and checks that the file has each entry exactly once (#104).
 - [ ] Send analytics in batches: buffer events in a `Channel` and upload 10 at a time, or every 5 seconds, whichever comes first.
 
 ---
@@ -1031,7 +1029,7 @@ These aren't user-visible bugs, but an interviewer will notice them. Being able 
 - [ ] Business logic, persistence and UI mixed together. `Calculator.format` reads SharedPreferences directly. `History.kt` has both storage and UI.
 - [ ] Composables take the whole `CalculatorViewModel` instead of state plus lambdas (hard to preview and test).
 - [ ] Composables have no `modifier: Modifier = Modifier` parameter, and `height: Int` is passed around instead of `Dp`.
-- [ ] Hard-coded strings almost everywhere (only two are in `strings.xml`), plus hard-coded colours, dimensions and font sizes. The app name is hard-coded in the manifest.
+- [ ] Hard-coded strings almost everywhere (only two are in `strings.xml`), plus hard-coded colours, dimensions and font sizes. The app name is hard-coded in the manifest, and file names such as `"history.txt"` and `"input_log.txt"` are repeated as literals in several files.
 - [ ] Hard-coded colours instead of `MaterialTheme.colorScheme`. No typography or shapes in the theme.
 - [ ] `Box` + `clickable` for buttons: no button role for accessibility, no ripple customisation, `⌫` has no content description, touch targets are fixed.
 - [ ] `Column` + `verticalScroll` + `for` loop for a list that can grow without limit. Use `LazyColumn` with stable `key`s.
@@ -1049,7 +1047,7 @@ These aren't user-visible bugs, but an interviewer will notice them. Being able 
 
 - [ ] Extend the `Calculator` unit tests (tokenizer, parser, formatter) so every math bug above has a test.
 - [ ] Add a Compose UI test for the history → calculator flow (#25) and the input-preservation bug (#26).
-- [ ] Inject dispatchers into the ViewModel, then test the preview (#29), idle clear (#30) and stats (#34) with `runTest`, `StandardTestDispatcher` and virtual time (`advanceTimeBy`), so the tests don't actually wait.
+- [ ] Inject dispatchers into the ViewModel, then test the preview (#29), idle clear (#30) and stats (#34) with `runTest`, `StandardTestDispatcher` and virtual time (`advanceTimeBy`), so the tests don't actually wait. Do the same for `TextSaver`, and check that two saves in a row leave each entry in the file exactly once (#104).
 - [ ] Move to a single `CalculatorUiState` data class exposed as `StateFlow` and collected with `collectAsStateWithLifecycle()`.
 - [ ] Replace SharedPreferences with DataStore, and history with Room.
 - [ ] Finish the Hilt migration. Constructor-inject everything, including an `@ApplicationScope` `CoroutineScope` in place of `appScope`, a `@HiltViewModel` `CalculatorViewModel`, and repositories for history, memory and settings. Then delete `appEntryPoint()` and `MainActivity.instance`.
