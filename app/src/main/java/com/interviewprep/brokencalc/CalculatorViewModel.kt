@@ -23,6 +23,7 @@ class CalculatorViewModel : ViewModel() {
 
     fun onButton(label: String) {
         val before = display
+        Analytics.track("key " + label)
         when (label) {
             "0", "1", "2", "3", "4", "5", "6", "7", "8", "9" -> {
                 if (justEvaluated) {

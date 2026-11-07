@@ -20,5 +20,6 @@ class CalcApp : Application(), Configuration.Provider {
     override fun onCreate() {
         super.onCreate()
         BackupScheduler.scheduleDailyBackup(this)
+        Analytics.start()
     }
 }

@@ -87,6 +87,8 @@ fun SettingsScreen() {
 
         ExportSection()
 
+        ResetSection()
+
         Text(
             text = "Broken Calc v1.0",
             color = Color.Gray,

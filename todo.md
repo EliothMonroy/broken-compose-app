@@ -18,7 +18,7 @@ The first three sections (Easy, Medium, Hard) cover the core calculator. The sec
 
 A few bugs block or disturb others. Fix them early, or keep them in mind:
 
-- **#38: opening Settings crashes the app.** Everything in Settings is out of reach until it's fixed: #6, #7, #16, #18, #39, #40, the WorkManager section (#73–#77) and the Permissions section (#93–#97).
+- **#38: opening Settings crashes the app.** Everything in Settings is out of reach until it's fixed: #6, #7, #16, #18, #39, #40, the WorkManager section (#73–#77), the Permissions section (#93–#97) and #103.
 - **#36: History crashes once any result is 1,000 or more.** Avoid big results while you work on History bugs, or fix #36 early. (It also hides #22.)
 - **#31: leaving the calculator screen slows the whole app down,** and its log spam pushes other lines out of logcat. After a few trips, `=` stops working.
 - **#30: the display clears itself about 30 seconds after the calculator opens,** so do the calculator part of a test quickly.
@@ -218,7 +218,7 @@ To rotate an emulator that has auto-rotate turned off, run `adb shell settings p
 
 ## Coroutines
 
-These cover what interviewers usually ask about: scopes, cancellation, dispatchers, `async`/`await`, exception propagation, `SupervisorJob`, and Flow.
+These cover what interviewers usually ask about: scopes, cancellation, dispatchers, `async`/`await`, exception propagation, `SupervisorJob`, and Flow. Waiting for a job to finish (`join`, `cancelAndJoin`) and putting values into `StateFlow`/`SharedFlow` (`value =`, `emit`, `tryEmit`) are in **Jobs and hot flows** (#103–#105), near the end.
 
 > ⚠️ **#31 slows the whole app down** every time you leave the calculator screen, and its log spam hides other log output. If it gets in your way, fix it first.
 
@@ -969,6 +969,42 @@ Useful commands:
 - [ ] Write a Compose UI test that forces a size (`DeviceConfigurationOverride.ForcedSize`) and checks both layouts on one device.
 - [ ] Add a tabletop layout for foldables with `WindowInfoTracker` and `FoldingFeature` (`androidx.window` is already a dependency): display on the top half, keypad on the bottom half.
 - [ ] Make the selection survive process death and window changes by moving it into a ViewModel with `SavedStateHandle`.
+
+## Jobs and hot flows
+
+Three small features that all run on `appScope`. Settings has a **Reset** section that deletes your history, memory and saved files (`AppReset.kt`). History has a **Save as text** button that writes every entry to `files/history.txt`, and tapping it again starts over with the latest history (`SaveAsText.kt`). `Analytics.kt` records every keypad press and sends it to a slow, pretend server. Run `adb logcat -s Analytics` to watch what gets sent. These bugs cover waiting for a coroutine to finish (`join`, `cancelAndJoin`), why cancellation is cooperative, and how `MutableStateFlow` and `MutableSharedFlow` treat the values you put in them (`value =`, `emit`, `tryEmit`).
+
+> ⚠️ All three run on `appScope`, so once #37 has happened in a run (a failed memory save), they silently do nothing. Restart the app before each test. #103 is in Settings, so it needs #38 fixed. Avoid results of 1,000 or more, because #36 crashes History.
+
+- [ ] **103. "Reset app data" says everything was reset, but nothing changes until you restart**
+  - Steps: `2`, `+`, `2`, `=`, then `M+`. Open Settings and tap **Reset app data**. Look at the History count in the top bar, then go back to the calculator and press `C`, `MR`. Now force-stop and reopen the app.
+  - Expected: right after the reset, History is empty and `MR` gives `0`.
+  - Actual: the toast says "Everything was reset", but History still shows `(1)` and `MR` still gives `4`. After the restart both are gone. Logcat shows `AppReset: Saved data wiped` about half a second after the tap.
+  <details><summary>Hint</summary>Look at the order of things in <code>ResetSection</code>'s <code>onClick</code>. <code>wipeSavedData</code> starts the work and returns straight away, so everything after it runs <b>before</b> the wipe. It even returns the <code>Job</code>, and nobody uses it. You need the reload to wait: launch a coroutine (for example from <code>rememberCoroutineScope()</code>) and call <code>job.join()</code> before reloading. Even better, make <code>wipeSavedData</code> a <code>suspend</code> function that uses <code>withContext(Dispatchers.IO)</code>, so callers can't forget to wait. Interview follow-ups: <code>join()</code> doesn't throw when the job failed, but <code>await()</code> does. How would you tell the user that the reset failed? What does <code>join()</code> return on a scope that #37 has already cancelled? And who should own this work if the user leaves Settings halfway through?</details>
+
+- [ ] **104. Tapping "Save as text" twice saves some entries twice, in a jumbled order**
+  - Steps: do five quick sums: `1+1=`, `2+2=`, `3+3=`, `4+4=`, `1+2=`. Open History and tap **Save as text**. Wait for the toast, then tap it twice, about half a second apart. Read the file with `adb shell run-as com.interviewprep.brokencalc cat files/history.txt`.
+  - Expected: one tap gives "Saved 5 lines to history.txt". A second tap starts over, so the file still ends up with each entry once, in order.
+  - Actual: one tap works. Two taps give "Saved 7 lines to history.txt" (the number depends on your timing), and the file has entries twice and out of order, for example `1+1`, `4+4`, `2+2`, `1+2`, `3+3`, `4+4`, `1+2`.
+  <details><summary>Hint</summary><code>job?.cancel()</code> only <i>asks</i> the old coroutine to stop. Cancellation is cooperative: a coroutine notices it at a suspension point (<code>delay</code>, <code>withContext</code>, <code>yield</code>) or when it checks <code>isActive</code>/<code>ensureActive()</code>. <code>Thread.sleep</code> and file writes don't check, so the old save keeps writing next to the new one. Two changes are needed: make the loop cooperative, and make the new save wait until the old one has really stopped, with <code>cancelAndJoin()</code> inside the new coroutine. Interview follow-ups: what happens if you only add <code>cancelAndJoin()</code>? And if you only make the loop cooperative? Why does the old save never show its own toast? When would a <code>Mutex</code> be the better tool, and what is <code>withContext(NonCancellable)</code> for?</details>
+
+- [ ] **105. Analytics loses taps: repeated keys are sent once, and fast typing skips keys**
+  - Steps: run `adb logcat -s Analytics` and open the app. Press `5` three times, about a second apart. Then press `1`, `2`, `3`, `4` as fast as you can.
+  - Expected: logcat shows `app_open`, three `key 5` events, then `key 1`, `key 2`, `key 3` and `key 4`: eight events in total.
+  - Actual: logcat shows `Sent "app_open"`, one `Sent "key 5"`, then `Sent "key 1"` and `Sent "key 4"`. Only four events arrive, and the display itself is fine.
+  <details><summary>Hint</summary>Look at what <code>Analytics.events</code> is. A <code>StateFlow</code> holds <i>state</i>: it never emits a value equal to the current one, and a slow collector only sees the newest value (conflation). That's right for a screen, but wrong for events where every single one counts. Would replacing <code>events.value = event</code> with <code>events.emit(event)</code> help? (On a <code>MutableStateFlow</code> they do the same thing.) What about a <code>MutableSharedFlow&lt;String&gt;()</code> with <code>tryEmit</code>? Try it: with no buffer, <code>tryEmit</code> fails every time a collector is listening, and it only tells you through its return value. Compare <code>MutableSharedFlow(extraBufferCapacity = …)</code> with <code>tryEmit</code>, <code>emit</code> from a coroutine (it suspends until there's room), and a <code>Channel</code> with <code>receiveAsFlow()</code>. Which one survives a burst of 100 taps, and what should happen when the buffer is full (<code>BufferOverflow</code>)?</details>
+
+**Bad practices in this area**
+
+- [ ] `wipeSavedData` returns a `Job` instead of being a `suspend` function, and the UI does storage work directly in an `onClick`.
+- [ ] `TextSaver` keeps a global `var job`, calls `Thread.sleep` inside a coroutine, opens the file again for every line, and reads `HistoryManager.items` from a background thread while the main thread can change it.
+- [ ] `Analytics` is a global object with a collector that runs forever in `appScope`, and its `sent` counter is changed from background threads with no synchronization.
+- [ ] File names are repeated as string literals in several files (`"history.txt"`, `"input_log.txt"`).
+
+**Stretch goals**
+
+- [ ] Inject a dispatcher into `TextSaver` and write a `runTest` test that starts two saves and checks that the file has each entry exactly once (#104).
+- [ ] Send analytics in batches: buffer events in a `Channel` and upload 10 at a time, or every 5 seconds, whichever comes first.
 
 ---
 
